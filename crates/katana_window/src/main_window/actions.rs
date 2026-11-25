@@ -577,6 +577,16 @@ pub const LAYOUTS: [(LayoutKind, &str, &str, &str); 6] = [
 // shown, and one line for it.
 pub use crate::view_workspace::{tiling_actions, tiling_line};
 
+/// View > Viewport Layout's and the Window menu's Duplicate View: a copy of the active view beside
+/// it, and the open views tiled (VIEWS DUPLICATE TILE), as a view's own Duplicate button does
+/// for that view.
+pub const DUPLICATE_VIEW_ACTION: &str = "viewDuplicate";
+
+/// The Duplicate View row the two menus show, after the tilings.
+fn duplicate_view_action() -> Action {
+    crate::view_workspace::duplicate_action(DUPLICATE_VIEW_ACTION, "the active view")
+}
+
 /// The object name of the Window menu's item for view `id`: it makes that view the active one.
 pub const WINDOW_VIEW_ACTION: &str = "windowView";
 
@@ -1162,6 +1172,9 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
         .extend(tiling_actions().into_iter().map(MenuItem::Action));
     layout_menu
         .items
+        .push(MenuItem::Action(duplicate_view_action()));
+    layout_menu
+        .items
         .push(MenuItem::Section(String::from("Presets")));
     for (kind, name, icon, tip) in LAYOUTS {
         layout_menu.items.push(MenuItem::Action(act(
@@ -1437,6 +1450,9 @@ pub fn compose_with(window: &MainWindow, restored: bool) -> Composed {
     window_menu
         .items
         .extend(tiling_actions().into_iter().map(MenuItem::Action));
+    window_menu
+        .items
+        .push(MenuItem::Action(duplicate_view_action()));
     window_menu
         .items
         .push(MenuItem::Section(String::from("Open views")));

@@ -2784,6 +2784,21 @@ if(KATANA_TEST_WINDOW)
             "-DEXPECT=tiled=3 kind=columns docked=0 minimised=0.*tiled=3 kind=rows docked=0 minimised=0.*tiled=3 kind=grid docked=0 minimised=0.*VIEWS TILE takes GRID, COLUMNS or ROWS, not 'DIAGONAL'"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/views_tiled_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    # A view's Duplicate button (docs/desktop.md, "Duplicating a view"): the
+    # one line VIEWS DUPLICATE 1 TILE copies the plan beside it, makes the copy
+    # active and tiles the two; View > Viewport Layout's Duplicate View then
+    # copies the active view - the copy - by VIEWS DUPLICATE TILE and tiles
+    # three. The two tiled views are too narrow for the bar's Duplicate, which
+    # is why the second copy is made from the menu.
+    add_test(NAME qt_a_views_duplicate_button_copies_it_beside_and_tiles_the_views_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=${KATANA_PROGRAM_katana}"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
+            "-DDRIVE=%View1|!ViewDuplicateButton|>VIEWS|*viewDuplicate|>VIEWS"
+            "-DEXPECT=duplicated=1 copy=2[\r\n]+view=2 kind=plan title=\"Plan 2\" active=yes[^\r\n]*[\r\n]+tiled=2 kind=grid docked=0 minimised=0.*views=2 linked=0.*duplicated=2 copy=3[\r\n]+view=3 kind=plan title=\"Plan 3\" active=yes[^\r\n]*[\r\n]+tiled=3 kind=grid docked=0 minimised=0.*views=3 linked=0"
+            "-DFORBID=unknown command"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/views_duplicated_headless.png"
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
     # The Window menu (docs/desktop.md, "The Window menu"): it lists the three
     # tilings and every open view by its title, each with its status tip; an
     # item makes its view the active one by the VIEWS ACTIVATE line, and is
@@ -2794,7 +2809,7 @@ if(KATANA_TEST_WINDOW)
             "-DAPP=${KATANA_PROGRAM_katana}"
             "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_such_project"
             "-DDRIVE=>VIEWS OPEN 3d|?windowMenu|?windowView1|*windowView1|>VIEWS|?windowView1|?windowView2"
-            "-DEXPECT=windowMenu: Window: Tile \\[[^]]+\\] ; Tile Side by Side \\[[^]]+\\] ; Tile Stacked \\[[^]]+\\] ; Plan 1 \\[[^]]*VIEWS ACTIVATE 1[^]]*\\] ; 3D 1 \\[[^]]*VIEWS ACTIVATE 2[^]]*\\][\r\n]+windowView1: Plan 1, unchecked.*view=1 kind=plan title=\"Plan 1\" active=yes.*view=2 kind=3d title=\"3D 1\" active=no.*windowView1: Plan 1, checked[\r\n]+windowView2: 3D 1, unchecked"
+            "-DEXPECT=windowMenu: Window: Tile \\[[^]]+\\] ; Tile Side by Side \\[[^]]+\\] ; Tile Stacked \\[[^]]+\\] ; Duplicate View \\[[^]]*VIEWS DUPLICATE[^]]*\\] ; Plan 1 \\[[^]]*VIEWS ACTIVATE 1[^]]*\\] ; 3D 1 \\[[^]]*VIEWS ACTIVATE 2[^]]*\\][\r\n]+windowView1: Plan 1, unchecked.*view=1 kind=plan title=\"Plan 1\" active=yes.*view=2 kind=3d title=\"3D 1\" active=no.*windowView1: Plan 1, checked[\r\n]+windowView2: 3D 1, unchecked"
             "-DFORBID=unknown command"
             "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/window_menu_headless.png"
             -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
@@ -3307,6 +3322,7 @@ if(KATANA_TEST_WINDOW)
                          qt_quick_select_is_answered_at_the_command_line_headless
                          qt_linked_plan_views_zoom_together_headless
                          qt_views_tile_by_the_line_and_by_the_menu_headless
+                         qt_a_views_duplicate_button_copies_it_beside_and_tiles_the_views_headless
                          qt_the_window_menu_lists_the_open_views_and_activates_one_headless
                          qt_unlinking_one_of_two_views_unlinks_both_headless
                          qt_a_design_view_and_an_as_built_view_hide_each_others_layers_headless

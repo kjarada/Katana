@@ -33,7 +33,7 @@ root, is `docs/rust.md`, "WSL, where the port is built".
 |---|---|---|---|---|
 | WSL, Linux | the prefix's (1.98.1 at the snapshot) | the prefix's GCC 16.2, glibc 2.28 sysroot | the prefix's | the prefix's |
 | macOS (Apple silicon) | the prefix's | the prefix's clang 23 and libc++ | the prefix's | the prefix's |
-| Windows x86-64 | MSYS2 UCRT64's `rust` (1.99.1) | UCRT64's GCC | UCRT64's | UCRT64's |
+| Windows x86-64 | MSYS2 UCRT64's `rust` (1.100.0) | UCRT64's GCC | UCRT64's | UCRT64's |
 | Windows ARM64 | MSYS2 CLANGARM64's `rust` | CLANGARM64's clang | CLANGARM64's | CLANGARM64's |
 
 Three files in the crates are C++, and the build compiles them: the shims of
@@ -288,8 +288,22 @@ rest, never after a lone `pacman -Sy`: a newer build of it can need an
 (`docs/rust.md`, "Windows, once the port works"). `--needed` leaves an
 installed package as it is, but upgrading `rust` alone would move it past
 that toolchain, so update MSYS2 whole (`pacman -Syu`) or not at all. The
-owner's machine has 1.99.1-1, installed on 2026-11-25 from the package list
-of 2026-10-24 that the rest came from.
+owner's machine had 1.99.1-1, installed on 2026-11-25 from the package list
+of 2026-10-24 that the rest came from; by that afternoon's builds it had
+1.100.0 (Rev2), and they ran clean on it. 1.100 brought lints 1.99 did not
+give, each mended at its source the same day rather than allowed: Clippy's
+`needless_range_loop` (two loops in `crates/katana_terrain/src/tin_surface.rs`
+and one in `crates/katana_cad/src/plotting/sheet_verbs.rs`, each now over the
+slice it read by index, the same items in the same order), `needless_bool` (in
+`crates/katana_window/src/drawing/feedback_painter.rs`) and
+`doc_lazy_continuation`; and Cargo's own `unused_dependencies` and
+`unused_workspace_dependencies`, which found `egui_extras` in the window (used
+by nothing, and gone with the two crates only it brought in), `katana_core` in
+`katana_math`, `katana_geometry` in `katana_surveyio` (its tests' only, so a
+dev-dependency now), and `katana_updater` and `katana_window` in the
+workspace's table (no crate takes either from it). The WSL toolchain, 1.98.1,
+gives none of these, so a change can be clean there and not here: build both
+before a hand-off.
 
 **The build.** `bash tools/build_visible.sh` from Git Bash (or any bash),
 with no `wsl`: it puts `/c/msys64/ucrt64/bin` first on `PATH` itself. By

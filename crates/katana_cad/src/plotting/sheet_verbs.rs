@@ -1873,8 +1873,13 @@ fn view_verb(
                 return Ok(String::from("0 sheets"));
             }
             let mut reply = String::new();
-            for i in first_sheet..last_sheet {
-                let sheet = &set.sheets[i];
+            for (i, sheet) in set
+                .sheets
+                .iter()
+                .enumerate()
+                .take(last_sheet)
+                .skip(first_sheet)
+            {
                 if !reply.is_empty() {
                     reply.push('\n');
                 }

@@ -2472,10 +2472,11 @@ as they are: "Three: Left" is one tall view and two stacked by intent.
 *Rejected:*
 
 - *Cascading the views as floating windows*, the other half of a classic
-  Window menu. A view floats as a window INSIDE the main window here and
-  cannot leave it, so a cascade would stack every view over the one drawing
-  area and hide all but the front one's body - the opposite of arranging
-  them.
+  Window menu. A cascade stacks every view over the others and hides all but
+  the front one's body - the opposite of arranging them; and since
+  2026-11-25 a floating view on the desktop is a window of its own ("A
+  floating view is a window of its own"), which a person places where they
+  want it.
 - *Tiling on its own whenever a view opens or closes.* The window changing
   the layout by itself is what the dock workspace was made to end (above):
   a person who has sized a plan view beside a narrow section would lose that
@@ -2515,6 +2516,63 @@ by `qt_views_tile_by_the_line_and_by_the_menu_headless` (three views tiled
 by the typed line and by two of the menu's items, and a kind the verb does
 not know refused by name).
 
+### Duplicating a view
+
+The owner asked on 2026-11-25 for "a button to duplicate the view and tile
+the views". Every view's bar has two buttons for it, after its zoom tools:
+
+| Button | Name | Line |
+| --- | --- | --- |
+| Duplicate View | `ViewDuplicateButton` | `VIEWS DUPLICATE <id> TILE` |
+| Tile Views | `ViewTileButton` | `VIEWS TILE GRID`, View > Viewport Layout > Tile's line |
+
+Duplicate View is in the bar's shortcut menu too (`viewBarDuplicate`, the
+same line), and after the tilings in View > Viewport Layout and the Window
+menu (`viewDuplicate`, `VIEWS DUPLICATE TILE`, which copies the active
+view). Each hands its line to the window's executor, as a typed line is
+run: one path, logged, with one reply (`docs/cad.md`, "The window's views:
+VIEWS and ZOOM").
+
+**Duplicate is the copy and the tiling in one line.** The copy is opened
+beside the view it copies and made the active view, then every open view is
+tiled, the copy first - so a person who presses it sees the two side by
+side at once, which is what a second look is for. A line without `TILE`
+leaves the arrangement as it is: the copy cuts the place of the view it
+copies in halves along its longer side, beside that view and not beside the
+active one, where `VIEWS OPEN` puts a new view.
+
+**A copy looks at what its view looks at** (`ViewSet::duplicate`): the same
+kind, the same plan pan and zoom, camera and section, hiding the same layers
+and reference layers and ghosting the selection as it does. A plan copy
+keeps its view's centre and scale in the half place it is given, as its view
+does: the room changed, not the zoom. It is numbered as any new view
+("Plan 2"). Not copied, each for its reason: the link (a copy that joined
+would move with its view, the same look twice); the paper-style scale, which
+is the drawing's - saved by view id and undone as an edit - so the copy
+starts at Auto and duplicating is no edit; and the move clock.
+
+**Both buttons are the first tools a narrowing bar lets go**
+(`ARRANGE_PRIORITY`, below every zoom tool and the paper scale): each is in
+a menu at any width, and a view narrow enough to lose them is already
+sharing the workspace. Their icons are the window's Copy and Tile.
+
+*Rejected:* Duplicate leaving the arrangement as it is, the copy cutting its
+view's place, and Tile pressed after: the owner asked for the two together,
+and a half place each, then a third and a quarter, is the arrangement Tile
+was made to end ("Tiling the open views"); the line without `TILE` keeps
+that for a script. A copy that floats over its view, which would hide what
+it copies. Copying the paper scale, for the reason above.
+
+Tested in `crates/katana_window/tests/workspace/view_duplicate.rs`
+(`view_duplicate::*`: the button's line, the copy's place, zoom and layers,
+the two tiled side by side, no undo step; a line without `TILE` cutting the
+copied view's place and not the active one's; Tile's button; the bar menu's
+item; the priority, swept across widths that reach both sides of it) and in
+`crates/katana_window/tests/workspace/window_menu.rs`
+(`window_menu::duplicate_view_in_window_copies_the_active_view_beside_it_and_tiles_by_one_line`);
+the real window is driven through the button and the menu by
+`qt_a_views_duplicate_button_copies_it_beside_and_tiles_the_views_headless`.
+
 ### A view's title bar menu
 
 A right-click on a view's title bar, anywhere that is not one of its
@@ -2529,6 +2587,7 @@ was opened on:
 | Maximise, or Restore while it is maximised | `viewBarMaximise` | the bar's Maximise button |
 | Close | `viewBarClose` | the bar's Close button |
 | Tile, Tile Side by Side, Tile Stacked | `viewTile`, `viewTileSideBySide`, `viewTileStacked` | `VIEWS TILE`, `VIEWS TILE COLUMNS`, `VIEWS TILE ROWS` |
+| Duplicate View | `viewBarDuplicate` | `VIEWS DUPLICATE <id> TILE`, the bar's Duplicate button ("Duplicating a view") |
 
 **It has no command of its own.** A button's item is handed to the very
 function the button's press is (`ViewWorkspace::trigger_bar_menu` makes the
@@ -2568,13 +2627,14 @@ and a step for a right-click would be the step engine's to add
 ### The Window menu
 
 The menu bar has a Window menu (`windowMenu`, before Help): the three
-tilings under "Arrange the open views", then every open view by its title
+tilings and Duplicate View under "Arrange the open views", then every open view by its title
 under "Open views", in the order opened, the active one ticked, each with
 the icon of what it shows.
 
 | Item | Name | Line |
 | --- | --- | --- |
 | Tile, Tile Side by Side, Tile Stacked | `viewTile`, `viewTileSideBySide`, `viewTileStacked` | `VIEWS TILE ...` |
+| Duplicate View | `viewDuplicate` | `VIEWS DUPLICATE TILE`: the active view copied, then the views tiled |
 | a view's title ("Plan 1", "3D 1") | `windowView` and the view's id (`windowView2`) | `VIEWS ACTIVATE <id>` |
 
 A view's item hands `VIEWS ACTIVATE <id>` to the window's executor
@@ -3758,10 +3818,13 @@ arranged meanwhile. Now:
 - **Its title bar moves it**, while the button is held; it cannot be put
   where its bar is out of reach (its top stays inside the workspace, and 60
   points of its bar across), and a window made smaller since brings it back
-  into reach as it is drawn.
+  into reach as it is drawn. This is a view floating INSIDE the workspace,
+  as it does headless; on the desktop it is a window of its own, moved by the
+  system's frame and anywhere ("A floating view is a window of its own").
 - **Maximise fills the workspace with it**, over the docked views, which are
   not hidden; Restore gives it back the rectangle it had. It follows the
-  workspace's size while it is maximised, and is not moved by its bar.
+  workspace's size while it is maximised, and is not moved by its bar. (A
+  view in a window of its own is maximised by the system.)
 - **Minimise keeps the rectangle with the tray's record**, and the tray
   button brings the view back floating there - when its neighbours have
   changed too, which is the case that docked it.
@@ -3776,8 +3839,9 @@ sessions"). *Not done:* sizing a floating view by its edges - it has the
 size it lifted off with, or a maximise - which wants the edge strips the
 window's own floating panels have
 (`crates/katana_window/src/main_window/docking_ui.rs`) made the chrome's, so
-that both use one; and a floating view leaving the main window, which waits
-on the owner.
+that both use one. (On the desktop a floating view is now a window of its
+own, which the system's frame sizes: "A floating view is a window of its
+own".)
 
 **Rejected: rolling a dock up to its title bar.** Measured offscreen in the
 C++'s 1360 x 860 window: Properties alone in the right area, rolled up, took
@@ -3864,6 +3928,133 @@ Point Manager dock (`SurveyPointsDock`) wears the chrome now that
 the window's dock chrome hands it over, and the workbench has the chrome
 forget the dock before deleting it; its Minimise, tray and Float are the
 window's own panels' since 2026-11-21, with no automated test for this dock.
+
+### A floating view is a window of its own
+
+The owner asked on 2026-11-25 why a view "cannot go outside the main" window.
+
+**Why it could not.** A floating view was never a window. The program is one
+system window - eframe's one winit window, egui's root viewport - and egui
+drew everything in it, a floating view included: an egui `Area` laid over the
+workspace at the rectangle the chrome keeps for it (`draw_docks` in
+`crates/katana_window/src/view_workspace.rs`). An Area is drawn inside the
+window it belongs to and is cut off at its edges, and the workspace went
+further on purpose: `kept_in_reach` held a floating view's title bar inside
+the workspace whenever it was dragged, restored or the window narrowed, so a
+view could never be lost off the window's edge. egui_dock's own floating
+windows are egui Windows, bound the same way. It was written down as not done
+("The dock chrome", "Where a floating view is").
+
+**What it is now.** egui can give a part of the frame a system window of its
+own: a viewport, which eframe opens as a second window on the same wgpu
+device. On the desktop a floating view is one - an *immediate* viewport,
+whose pass egui runs inside the main window's, so the view draws with all the
+frame lends it (the drawing, the executor, the scenery), as a view in the main
+window does (`ViewWorkspace::view_windows`, `ViewWorkspace::window_ui`,
+`MainWindow::view_windows_ui`):
+
+- **Float opens the window over the place the view left**, lifted a bar's
+  height as it always was. It is moved anywhere on the desktop - onto another
+  screen - by the system's frame, and sized from its edges, which a view
+  floating inside the workspace never could be. It is titled by the view
+  ("3D 1 - Katana") and has the application's icon and a taskbar button.
+- **Inside is the view as it always was**: its own bar with the kind
+  switcher, Link, Layers, the zoom tools, Duplicate and Tile, and Dock,
+  Minimise, Maximise and Close. Its kind menu, its bar's shortcut menu and its
+  Layers popup open in its window, under its bar (`drawn_at`); the Paper Style
+  Scale dialog, a dialog, opens in the main window.
+- **The keys reach the window's actions there too**: the main window's
+  keyboard pass (`crates/katana_window/src/main_window/shortcuts.rs`) runs
+  over each view window's keys before the view is drawn, so Ctrl+Z, Delete
+  and F9 pressed in a view window do what they do in the main window.
+- **The record is kept as before**, in the workspace's points from its top
+  left: the window's inside on the screen less the workspace's corner on the
+  screen (`follow_window`). So a saved session, the tray, Dock and a tiling go
+  on exactly as they did; the rectangle may now be anywhere. The record
+  follows the window wherever the person puts it, and a record that something
+  else changed - a drive's `set_float_rect`, a session restored - moves the
+  window to it, the system's frame allowed for.
+- **The system's close button docks the view** back where it came from.
+  Closing a window loses no view; the bar's Close closes one, as it does in
+  the main window.
+- **Maximise on its bar maximises the window** on its own screen, and Restore
+  restores it, by the system; filling the workspace would put a window from
+  another screen over the main one.
+- **A session restored brings each floating view back within reach** over
+  the workspace, as it always has (`restore_views`): the screen it was on may
+  not be there at the next start, and a window opened off every screen could
+  not be got back.
+
+**Headless, a floating view is drawn in the workspace**, as before. egui has
+windows to give only where its backend says so (`Context::embed_viewports`:
+false under eframe on the desktop, true by default); the headless runner, the
+screenshot steps and every test run egui alone, and there the workspace draws
+the floating view over itself, dragged by its bar, Maximise filling the
+workspace, kept in reach. One state shown two ways: what a view records, what
+its bar does and what a drive sees of it are the same.
+
+**One frame, the main window's.** The drive registry and the keyboard pass
+are egui plugins, and they began and ended a frame with every pass. A view
+window's pass, run inside the main window's, then wiped what the main window
+had recorded before it and completed a frame of the view's controls alone -
+which the main window's end then threw away, keeping only what it drew after;
+the keyboard pass, which finds the command line by its record, would have
+lost it. Both now begin and end with the main window's pass only, and a view
+window's controls are recorded into the main window's frame
+(`crates/katana_window/src/drive/registry.rs`, "ONE FRAME, THE MAIN
+WINDOW'S"). The case runs a nested pass as eframe does, with no window
+(`registry_passes::a_view_windows_pass_inside_the_main_windows_adds_to_its_frame_and_does_not_end_it`).
+
+*Rejected:*
+
+- *A Pop Out button beside Float*, Float staying inside. Two ways to float,
+  and the one a person reaches for - Float, then drag - would still stop at
+  the edge, which is what was asked about.
+- *A window without the system's frame*, moved by the view's own bar
+  (`egui::ViewportCommand::StartDrag`). It would look as the floating view did, but
+  the system's frame is what sizes a window from its edges, snaps it,
+  maximises it and takes it to another screen; and a drag started from the
+  bar hands the press to the system, which reads a double click there - Dock,
+  on this bar - as its own Maximise.
+- *A deferred viewport*, egui's other kind, which egui calls on its own with
+  only what it owns: the view draws with what the frame lends, which a
+  deferred viewport cannot borrow.
+- *Placing the window from the record at every frame.* egui sends a window a
+  command for every part of its builder that changed, so a builder made each
+  frame from the rectangle read back chases the window the person is
+  dragging. The builder is the one the window opened with, its title alone
+  following the view, and the window is moved only when the record was
+  changed by something else (`OwnWindow::placed`).
+
+Tested in `crates/katana_window/tests/workspace/view_windows.rs`
+(`view_windows::*`), the main window's harness told egui has windows and a
+second harness standing in for the view's: `Harness::set_place` gives it a
+place on the screen, and `Harness::press_close` presses the system's close
+button. A floated view is drawn there and not in the main window, opened over
+the place it left; its record follows the window off the main window and is
+not pulled back; a drive's rectangle moves the window, frame and all;
+Maximise and Restore ask the system and move nothing; the close button and
+Dock put it back where it came from; its menus and Layers popup open in it;
+and headless nothing changed.
+
+*Not done:*
+
+- **No headless run reaches a view window.** A screenshot is the main
+  window's, and no test may open a window; the eframe side
+  (`view_windows_ui`) is driven by none, and was left to the owner to try on
+  the desktop.
+- **Screens at two scales.** egui gives each window's rectangle in that
+  window's own points, so a view window on a screen scaled differently from
+  the main window's is kept at a rectangle that mixes the two, and a session
+  saved so may bring it back a little off. Points of one screen would want the
+  screens' places, which egui does not give.
+- **The system's own Maximise is not the bar's**: the bar still reads
+  Maximise over a window the system maximised, and the record follows the
+  maximised window. The bar's Maximise and Restore are the system's in step.
+- **A floating panel** (Layers, Properties, the command line) still floats
+  inside the main window ("The window's own panels float and minimise"). The
+  same viewport would take it out; a panel's drawing borrows the whole main
+  window, which wants its body made a function of what it reads first.
 
 ## The Properties panel: a tree read a level at a time
 

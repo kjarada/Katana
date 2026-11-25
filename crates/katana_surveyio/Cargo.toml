@@ -9,9 +9,12 @@ publish.workspace = true
 
 [dependencies]
 katana_core.workspace = true
-katana_geometry.workspace = true
 katana_math.workspace = true
 katana_survey.workspace = true
+
+# The tests' support builds geometry values to compare with; the library reads none.
+[dev-dependencies]
+katana_geometry.workspace = true
 
 [lints]
 workspace = true

@@ -1001,6 +1001,7 @@ mod mcp_server {
             "VIEWS",
             "VIEWS LINK 1,2",
             "VIEWS TILE",
+            "VIEWS DUPLICATE 1 TILE",
             "ZOOM IN",
             "Z",
         ] {

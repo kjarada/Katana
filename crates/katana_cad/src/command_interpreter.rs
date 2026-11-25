@@ -3643,6 +3643,9 @@ Views     the desktop window's views, except SCALE also edits saved plan views h
           VIEWS TILE [GRID|COLUMNS|ROWS]   arranges the views open now, each a place of its own
           of equal size, the active one first: a grid, side by side or stacked. Floating views
           are docked in, minimised ones stay in the tray; none is opened or closed
+          VIEWS DUPLICATE [id] [TILE [GRID|COLUMNS|ROWS]]   a copy of that view (the active
+          one when none is named) beside it, looking where it looks and hiding what it hides,
+          made active; with TILE the views are then arranged as VIEWS TILE arranges them
 Zoom      ZOOM (Z)   the active view's extents, as 'ZOOM and 'Z are | ZOOM EXTENTS (E, ALL,
           A) | IN [f] | OUT [f] | f | fX | WINDOW x0,y0,x1,y1 | CENTRE x,y [SCALE
           pixels-per-unit]   [view=id]; IN and OUT are by 2 about the view's centre;

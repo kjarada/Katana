@@ -1394,6 +1394,9 @@ VIEWS HIDE|SHOW <id> REFERENCE <ref>[,<ref>...]   the imported rasters and point
 VIEWS SET <id> ghosts=on|off          whether it shows the selection where it hides the layer
 VIEWS MESHES [FACES|FOOTPRINT|HIDDEN] how the window's plan views, plots and sheets draw meshes: meshes=faces
 VIEWS TILE [GRID|COLUMNS|ROWS]        arranges the views open now: tiled=3 kind=grid docked=1 minimised=0
+VIEWS DUPLICATE [<id>] [TILE [GRID|COLUMNS|ROWS]]
+                                      a copy of the view (the active one when none is named) beside it,
+                                      active: duplicated=1 copy=4, its record, then the tiling's record
 ZOOM | Z | 'ZOOM | 'Z                 the active view's extents, as always
 ZOOM EXTENTS | E | ALL | A | IN [f] | OUT [f] | <f> | <f>X | WINDOW x0,y0,x1,y1
      | CENTRE x,y [SCALE s]  [view=<id>]
@@ -1600,6 +1603,41 @@ none (`view_verbs_test::views_tile_refuses_what_it_does_not_take_and_asks_nothin
 `cli.views_tile_is_refused_saying_where_it_runs`). It is the window's
 layout, not the drawing: no undo step, as `HIDE` and `SHOW` are none. View >
 Viewport Layout's Tile, Tile Side by Side and Tile Stacked run these lines.
+
+**`DUPLICATE` opens a second look at a view** (the owner's request of
+2026-11-25 for "a button to duplicate the view and tile the views";
+`docs/desktop.md`, "Duplicating a view"): a view of the same kind, looking at
+the same place - its plan pan and zoom, its camera, its section - and hiding
+the same layers and reference layers, docked beside the view it copies (that
+view's place cut in halves along its longer side, as `VIEWS OPEN` cuts the
+active view's) and made the active view. Without an id it copies the active
+view. With `TILE`, and a tiling's word after it, the views are then arranged
+as `VIEWS TILE` arranges them, in the same line - so the bar's Duplicate
+button is one line in the log and one reply:
+
+```
+duplicated=1 copy=4
+view=4 kind=plan title="Plan 2" active=yes linked=no centre=10,20 scale=4 area=... ghosts=on hidden=survey
+tiled=4 kind=grid docked=0 minimised=0
+```
+
+What a copy is, and is not, is one function, `ViewSet::duplicate`: it does
+not join the link (a copy that joined would move with the view it came from,
+the same look twice), does not take the paper-style scale (the drawing's,
+saved by view id and undone as an edit, so copying it would make a copy of
+a view an edit of the drawing; the copy starts at Auto), and has not moved.
+Every word is read and the view found open before the window is asked for
+anything, so a refusal - no view open and none named, a view not open, a
+word that is no id, a tiling word `TILE` does not take, a word left over -
+copies nothing and arranges nothing. A host with no dock area refuses it
+(`ViewVerbHost::duplicate`'s default), and `katana_cli` and `katana_mcp`,
+with no host, refuse it with the rest of VIEWS
+(`view_verbs_test::views_duplicate_opens_a_copy_of_the_named_view_makes_it_active_and_names_both`,
+`view_verbs_test::views_duplicate_with_tile_arranges_the_views_after_the_copy_in_one_line`,
+`view_verbs_test::views_duplicate_refuses_before_it_asks_the_window_for_anything`,
+`view_set::a_duplicate_looks_at_what_its_view_looks_at_and_hides_what_it_hides`,
+`cli.views_duplicate_is_refused_saying_where_it_runs`). Like `TILE` it is
+the window's, not the drawing's: no undo step.
 
 `ZOOM` replies the record of the view it moved without `title`, `active`,
 `linked`, `ghosts` and `hidden` - where the view looks, not what it shows -

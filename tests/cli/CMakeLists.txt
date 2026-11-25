@@ -728,6 +728,15 @@ if(KATANA_TEST_CLI)
     set_tests_properties(cli.views_tile_is_refused_saying_where_it_runs PROPERTIES
         PASS_REGULAR_EXPRESSION "error: Unsupported: VIEWS is the desktop window's[^\r\n]*katana --command"
         FAIL_REGULAR_EXPRESSION "unknown command|point created|tiled=")
+    # VIEWS DUPLICATE opens a copy of one of the window's views beside it; katana_cli
+    # has no views to copy and no dock area to open one in, so it is refused with the
+    # rest of VIEWS, saying where it runs, and never answers as though it had copied.
+    add_test(NAME cli.views_duplicate_is_refused_saying_where_it_runs
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "VIEWS DUPLICATE 1 TILE" -c "POINT 1,1")
+    set_tests_properties(cli.views_duplicate_is_refused_saying_where_it_runs PROPERTIES
+        PASS_REGULAR_EXPRESSION "error: Unsupported: VIEWS is the desktop window's[^\r\n]*katana --command"
+        FAIL_REGULAR_EXPRESSION "unknown command|point created|duplicated=|copy=")
 
     add_test(NAME cli.paper_style_scale_lists_no_invented_views_in_a_new_session
         COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"

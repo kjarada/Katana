@@ -702,6 +702,104 @@ mod view_set {
         }
     }
 
+    // ---- duplicating a view ------------------------------------------------------------------------
+
+    #[test]
+    fn a_duplicate_looks_at_what_its_view_looks_at_and_hides_what_it_hides() {
+        let mut set = ViewSet::default();
+        let id = {
+            let added = set.add(ViewKind::Plan);
+            added.plan.resize(300.0, 200.0);
+            added.plan.center = Point2::new(512.0, -256.0);
+            added.plan.scale = 0.125;
+            added.plan_framed = true;
+            assert!(added.layers.hide("survey"));
+            added.hidden_references = BTreeSet::from([7, 9]);
+            added.section = Some(Section {
+                length: 12.5,
+                ..Section::default()
+            });
+            added.section_exaggeration = 4.0;
+            added.section_surfaces = 3;
+            added.selection_ghosts = false;
+            orbit_somewhere_odd(&mut added.camera);
+            added.camera_framed = true;
+            added.id
+        };
+        let copy = set.duplicate(id).expect("view 1 is open");
+
+        // The next id, and the lowest Plan number free: Plan 1 is the view copied.
+        assert_eq!(copy, 2);
+        assert_eq!(ids_of(&set), vec![1, 2]);
+        let (original, duplicate) = (view(&set, id).clone(), view(&set, copy).clone());
+        assert_eq!(duplicate.kind, ViewKind::Plan);
+        assert_eq!(ViewSet::title(&duplicate), "Plan 2");
+        // Where it looks, every part of it.
+        assert_eq!(duplicate.plan.center, Point2::new(512.0, -256.0));
+        assert_eq!(duplicate.plan.scale, 0.125);
+        assert_eq!(duplicate.plan.width_pixels, 300.0);
+        assert_eq!(duplicate.plan.height_pixels, 200.0);
+        assert!(duplicate.plan_framed, "it does not refit at its first paint");
+        expect_same_camera(&duplicate.camera, &original.camera);
+        assert_eq!(duplicate.camera_kind, original.camera_kind);
+        assert!(duplicate.camera_framed);
+        // What it shows of the drawing.
+        assert!(duplicate.layers.hides_directly("survey"));
+        assert_eq!(duplicate.layers.size(), 1);
+        assert_eq!(duplicate.hidden_references, BTreeSet::from([7, 9]));
+        assert!(!duplicate.selection_ghosts);
+        assert_eq!(
+            duplicate.section.as_ref().map(|section| section.length),
+            Some(12.5)
+        );
+        assert_eq!(duplicate.section_exaggeration, 4.0);
+        assert_eq!(duplicate.section_surfaces, 3);
+        // The copy is not made active: that is the workspace's to decide, as for add().
+        assert_eq!(set.active_id(), id);
+        // And it is a copy: hiding a layer in one hides it in that one alone.
+        assert!(view_mut(&mut set, copy).layers.hide("design"));
+        assert!(!view(&set, id).layers.hides_directly("design"));
+    }
+
+    #[test]
+    fn a_duplicate_is_not_linked_has_not_moved_and_starts_at_the_automatic_paper_scale() {
+        let mut set = ViewSet::default();
+        let first = framed_plan(&mut set, 300.0, 200.0, 10.0, 20.0, 4.0);
+        let second = framed_plan(&mut set, 300.0, 200.0, 0.0, 0.0, 1.0);
+        set.link(&[first, second], None).expect("two plan views link");
+        set.note_moved(first);
+        view_mut(&mut set, first).paper_style_scale = Some(500.0);
+        assert!(view(&set, first).last_moved > 0);
+
+        let copy = set.duplicate(first).expect("the first view is open");
+        let duplicate = view(&set, copy);
+        assert!(!duplicate.linked, "a view joins a link only when asked");
+        assert_eq!(duplicate.last_moved, 0);
+        assert_eq!(duplicate.paper_style_scale, None, "the drawing's, by view id");
+        assert_eq!(set.linked_views(), vec![first, second]);
+        // A copy of a 3D view is a 3D view, numbered among them.
+        let model = set.add(ViewKind::Model3D).id;
+        let model_copy = set.duplicate(model).expect("the 3D view is open");
+        assert_eq!(ViewSet::title(view(&set, model_copy)), "3D 2");
+    }
+
+    #[test]
+    fn duplicating_a_view_that_is_not_open_is_not_found_and_adds_nothing() {
+        let mut set = ViewSet::default();
+        let refused = set.duplicate(1).expect_err("no view is open");
+        assert_eq!(refused.code, ErrorCode::NotFound);
+        assert_eq!(set.size(), 0);
+        let id = set.add(ViewKind::Plan).id;
+        set.remove(id).expect("the view is open");
+        assert_eq!(
+            set.duplicate(id).expect_err("it was closed").code,
+            ErrorCode::NotFound
+        );
+        assert_eq!(set.size(), 0);
+        // A refused duplicate gave out no id: the next view is 2, as it would have been.
+        assert_eq!(set.add(ViewKind::Plan).id, 2);
+    }
+
     // ---- numbering and titles ---------------------------------------------------------------------
 
     #[test]

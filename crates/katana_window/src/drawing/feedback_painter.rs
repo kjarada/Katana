@@ -358,10 +358,7 @@ fn rects_intersect(a: &RectF, b: &RectF) -> bool {
     } else {
         b2 += b.height;
     }
-    if t2 == b2 || t1 >= b2 || t2 >= b1 {
-        return false;
-    }
-    true
+    !(t2 == b2 || t1 >= b2 || t2 >= b1)
 }
 
 fn ellipse_at(centre: PointF, rx: f64, ry: f64) -> RectF {

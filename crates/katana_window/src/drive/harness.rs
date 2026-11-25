@@ -62,6 +62,11 @@ pub struct Harness {
     posted: Vec<ActId>,
     events: Vec<Event>,
     frames: u64,
+    /// Where the window is on the screen, without and with the system's frame, in points: what
+    /// the desktop's egui reads from the system and a headless one never has (`set_place`).
+    place: (Option<Rect>, Option<Rect>),
+    /// The system's close button pressed, for the next frame (`press_close`).
+    closing: bool,
 }
 
 impl Default for Harness {
@@ -92,6 +97,8 @@ impl Harness {
             posted: Vec::new(),
             events: Vec::new(),
             frames: 0,
+            place: (None, None),
+            closing: false,
         }
     }
 
@@ -216,6 +223,23 @@ impl Harness {
         self
     }
 
+    /// The window's rectangle on the screen for the frames after this - `inner` without the
+    /// system's frame, `outer` with it, in points, egui's `ViewportInfo::inner_rect` and
+    /// `outer_rect` - as the desktop reads them for a window the person has moved or sized: a
+    /// test stands one harness in for a view's own window with it (docs/desktop.md, "A floating
+    /// view is a window of its own"). None, the default, is a window with no place, as headless.
+    pub fn set_place(&mut self, inner: Option<Rect>, outer: Option<Rect>) -> &mut Self {
+        self.place = (inner, outer);
+        self
+    }
+
+    /// The system's close button on the window pressed, for the next frame: egui's
+    /// `ViewportEvent::Close`, which `ViewportInfo::close_requested` answers for that frame.
+    pub fn press_close(&mut self) -> &mut Self {
+        self.closing = true;
+        self
+    }
+
     /// One frame of `ui`, with the input given since the last.
     pub fn frame(&mut self, mut ui: impl FnMut(&mut Ui)) -> egui::FullOutput {
         let mut input = egui::RawInput {
@@ -225,11 +249,12 @@ impl Harness {
             events: std::mem::take(&mut self.events),
             ..egui::RawInput::default()
         };
-        input
-            .viewports
-            .entry(ViewportId::ROOT)
-            .or_default()
-            .native_pixels_per_point = Some(self.pixels_per_point);
+        let viewport = input.viewports.entry(ViewportId::ROOT).or_default();
+        viewport.native_pixels_per_point = Some(self.pixels_per_point);
+        (viewport.inner_rect, viewport.outer_rect) = self.place;
+        if std::mem::take(&mut self.closing) {
+            viewport.events.push(egui::ViewportEvent::Close);
+        }
         let output = self.ctx.run_ui(input, &mut ui);
         self.time += FRAME_SECONDS;
         self.frames += 1;

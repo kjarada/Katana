@@ -261,6 +261,11 @@ impl egui::Plugin for Keyboard {
     /// the very next, with no frame drawn between.
     fn on_end_pass(&mut self, ui: &mut Ui) {
         let ctx = ui.ctx();
+        // The main window's pass ends last and has the say: a view's own window, whose pass
+        // egui runs inside the main window's, has no text box to remember.
+        if ctx.viewport_id() != egui::ViewportId::ROOT {
+            return;
+        }
         self.held = ctx.memory(|memory| memory.focused());
         self.held_text = self.held.is_some() && ctx.text_edit_focused();
     }

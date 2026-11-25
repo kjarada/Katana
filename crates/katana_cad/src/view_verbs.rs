@@ -49,6 +49,12 @@
 //! VIEWS TILE [GRID|COLUMNS|ROWS]        arranges the views open now, each a
 //!                                       place of its own of equal size:
 //!                                       tiled=3 kind=grid docked=1 minimised=0
+//! VIEWS DUPLICATE [<id>] [TILE [GRID|COLUMNS|ROWS]]
+//!                                       a copy of that view (the active one
+//!                                       when none is named) opened beside it
+//!                                       and made active, then the views tiled
+//!                                       when TILE says so: duplicated=1 copy=4,
+//!                                       the copy's record, the tiling's
 //! ZOOM | Z | 'ZOOM | 'Z                 the active view's extents, as always
 //! ZOOM EXTENTS | E | ALL | A | IN [f] | OUT [f] | <f> | <f>X | WINDOW x0,y0,x1,y1
 //!      | CENTRE x,y [SCALE s]  [view=<id>]
@@ -114,6 +120,16 @@
 //! one is restored first. One view, or none, is nothing to arrange: tiled=1 or
 //! tiled=0, and no refusal. It is the window's layout, not the drawing: no
 //! undo step, as HIDE and SHOW are none.
+//!
+//! DUPLICATE opens a second look at what a view shows (the owner's request of
+//! 2026-11-25 for a button that duplicates the view and tiles the views;
+//! docs/desktop.md, "Duplicating a view"): the same kind, at the same place,
+//! hiding the same layers (ViewSet::duplicate says what is copied and what is
+//! not, and why), docked beside the view it copies as VIEWS OPEN docks a view
+//! beside the active one, and made the active view. With TILE the views are
+//! then arranged as VIEWS TILE arranges them, in the same line, so a button
+//! that does both is one logged line and one reply. Like TILE it is the
+//! window's, not the drawing's: no undo step.
 //!
 //! Records, one per line, key=value, reals as format_exact_real writes them
 //! and angles in degrees; ghosts= is the view's switch (VIEWS SET), and
@@ -195,7 +211,7 @@ const VIEWS_USAGE: &str = "VIEWS [LIST] | OPEN plan|3d|section|elevation | ACTIV
      layer[,layer...]|LAYER name...|REFERENCE ref[,ref...] | SHOW id \
      layer[,layer...]|LAYER name...|REFERENCE ref[,ref...]|ALL | ISOLATE id layer|LAYER name | SET \
      id ghosts=on|off | MESHES [FACES|FOOTPRINT|HIDDEN] | SCALE id [AUTO|N|1:N] | SCALE LIST | \
-     TILE [GRID|COLUMNS|ROWS]";
+     TILE [GRID|COLUMNS|ROWS] | DUPLICATE [id] [TILE [GRID|COLUMNS|ROWS]]";
 const ZOOM_USAGE: &str = "ZOOM [EXTENTS | IN [f] | OUT [f] | factor | WINDOW x0,y0,x1,y1 | CENTRE \
      x,y [SCALE s] | SELECTION | DRAWING | VIEW [id] [EXTENTS] | AREA x0,y0,x1,y1 | LAYERS a,b \
      [ONLY] [WHERE k=v ...]] [view=id]";
@@ -368,6 +384,16 @@ pub trait ViewVerbHost {
         Err(Error::new(
             ErrorCode::Unsupported,
             "VIEWS TILE needs the window's dock area, which holds the views it arranges",
+        ))
+    }
+    /// Opens a copy of view `id`, an open view, beside it and makes the copy the active view
+    /// (VIEWS DUPLICATE): what the copy shows is ViewSet::duplicate's. Its id. A host with no dock
+    /// area to open the copy in refuses it - the default.
+    fn duplicate(&self, _id: ViewId) -> Result<ViewId> {
+        Err(Error::new(
+            ErrorCode::Unsupported,
+            "VIEWS DUPLICATE needs the window's dock area, where the copy is opened beside the \
+             view",
         ))
     }
 }
@@ -810,6 +836,77 @@ fn layer_shape(action: &str) -> &'static str {
     }
 }
 
+// What VIEWS TILE replies, and VIEWS DUPLICATE ... TILE after its own records.
+fn tile_record(kind: TileKind, outcome: TileOutcome) -> String {
+    format!(
+        "tiled={} kind={} docked={} minimised={}",
+        outcome.tiled,
+        kind.word(),
+        outcome.docked,
+        outcome.minimised
+    )
+}
+
+// A tiling's word after TILE: the grid when there is none.
+fn tile_kind_of(word: Option<&String>) -> Result<TileKind> {
+    match word {
+        None => Ok(TileKind::Grid),
+        Some(word) => TileKind::from_word(word).ok_or_else(|| {
+            make_error(
+                ErrorCode::ParseFailure,
+                format!("VIEWS TILE takes GRID, COLUMNS or ROWS, not '{word}'"),
+                word.as_str(),
+            )
+        }),
+    }
+}
+
+// VIEWS DUPLICATE [<id>] [TILE [GRID|COLUMNS|ROWS]]: every word read, and the view found open,
+// before the host is asked for anything, so a refusal leaves the window as it was.
+fn duplicate_verb(host: &dyn ViewVerbHost, args: &[String]) -> Result<String> {
+    let mut at = 1;
+    let source = match args.get(at) {
+        Some(word) if upper(word) != "TILE" => {
+            at += 1;
+            parse_view_id(word)?
+        }
+        _ => {
+            let active = host.views().borrow().active_id();
+            if active == NO_VIEW {
+                return Err(Error::new(
+                    ErrorCode::InvalidState,
+                    "VIEWS DUPLICATE copies the active view when none is named, and no view is \
+                     open; VIEWS OPEN plan opens one",
+                ));
+            }
+            active
+        }
+    };
+    let tile = match args.get(at) {
+        None => None,
+        Some(word) if upper(word) == "TILE" => {
+            let kind = args.get(at + 1);
+            at += 1 + usize::from(kind.is_some());
+            Some(tile_kind_of(kind)?)
+        }
+        Some(word) => return Err(refuse_views_word(word)),
+    };
+    if let Some(word) = args.get(at) {
+        return Err(refuse_views_word(word));
+    }
+    if host.views().borrow().find(source).is_none() {
+        return Err(not_open(source));
+    }
+    let copy = host.duplicate(source)?;
+    let mut reply = format!("duplicated={source} copy={copy}\n{}", record_of(host, copy)?);
+    if let Some(kind) = tile {
+        let outcome = host.tile(kind)?;
+        reply.push('\n');
+        reply += &tile_record(kind, outcome);
+    }
+    Ok(reply)
+}
+
 fn views_verb(document: &Document, host: &dyn ViewVerbHost, args: &[String]) -> Result<String> {
     let action = args
         .first()
@@ -863,24 +960,12 @@ fn views_verb(document: &Document, host: &dyn ViewVerbHost, args: &[String]) -> 
         if let Some(word) = args.get(2) {
             return Err(refuse_views_word(word));
         }
-        let kind = match args.get(1) {
-            None => TileKind::Grid,
-            Some(word) => TileKind::from_word(word).ok_or_else(|| {
-                make_error(
-                    ErrorCode::ParseFailure,
-                    format!("VIEWS TILE takes GRID, COLUMNS or ROWS, not '{word}'"),
-                    word.as_str(),
-                )
-            })?,
-        };
+        let kind = tile_kind_of(args.get(1))?;
         let outcome = host.tile(kind)?;
-        return Ok(format!(
-            "tiled={} kind={} docked={} minimised={}",
-            outcome.tiled,
-            kind.word(),
-            outcome.docked,
-            outcome.minimised
-        ));
+        return Ok(tile_record(kind, outcome));
+    }
+    if action == "DUPLICATE" {
+        return duplicate_verb(host, args);
     }
     if action == "ACTIVATE" {
         if args.len() != 2 {

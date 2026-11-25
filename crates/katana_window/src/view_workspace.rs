@@ -41,16 +41,24 @@
 //!   a 24-point tab bar over every dock, where the C++ views have only their 26-point title bar
 //!   (the measured headless geometry, docs/rust.md "Step 7"), with its own close and add buttons,
 //!   and its drags would put a view among the main window's panels, which the nested window was
-//!   made to prevent. A view floats as a window inside the main window.
+//!   made to prevent. A view floats as a window of its own (below).
 //!
 //! THE CHROME is the workspace's own `DockChrome<ViewTab>`: the C++ shares the main window's, so
 //! one tray holds a minimised panel and a minimised view, and the window draws the workspace's
 //! tray buttons beside its own (`tray_actions`, `restore_view`).
 //!
-//! A FLOATING VIEW is a window inside the workspace at a rectangle the chrome keeps for it
-//! (`DockChrome::float_rect`), in points from the workspace's top left - so it holds while a
-//! panel beside the views is hidden, and is what a saved session records. Float lifts a view off
-//! its docked place; its title bar drags it; Maximise fills the workspace with it.
+//! A FLOATING VIEW is at a rectangle the chrome keeps for it (`DockChrome::float_rect`), in
+//! points from the workspace's top left - so it holds while a panel beside the views is hidden,
+//! and is what a saved session records. Float lifts a view off its docked place. Where egui has
+//! windows of its own to give (the desktop: `!Context::embed_viewports`), the floating view is
+//! one - an egui immediate viewport the main window shows (`view_windows`, `window_ui`), which
+//! goes anywhere on the desktop, the system's frame moving and sizing it, and its rectangle is
+//! read back from where the person put it. Where egui has none (the headless runner, the tests)
+//! it is drawn inside the workspace, its title bar dragging it and Maximise filling the workspace
+//! with it, as it always was (docs/desktop.md, "A floating view is a window of its own").
+//!
+//! DUPLICATE (VIEWS DUPLICATE) opens a copy of a view beside it, and with TILE tiles the views:
+//! the view's bar, its shortcut menu and the View and Window menus have it (`duplicate_line`).
 //!
 //! A VIEW'S TITLE BAR HAS A SHORTCUT MENU (`BAR_MENU`): what its window buttons do, and the three
 //! tilings, each going the way the button or the View menu's item goes (`trigger_bar_menu`).
@@ -66,7 +74,10 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use egui::{Align, Layout, Pos2, Rect, Sense, Ui, UiBuilder, Vec2};
+use egui::{
+    Align, Layout, Pos2, Rect, Sense, Ui, UiBuilder, Vec2, ViewportBuilder, ViewportCommand,
+    ViewportId,
+};
 use egui_dock::{DockState, Node, NodeIndex, TabPath, Tree};
 use katana_cad::interactive_tool::{ToolInput, tool_catalog};
 use katana_cad::scene::{MeshPlanDisplay, SceneMesh, SceneOptions, SceneSurface};
@@ -128,6 +139,15 @@ const ZOOM_IN_OUT_PRIORITY: i32 = 1;
 const ZOOM_SELECTION_PRIORITY: i32 = 2;
 /// Also on the main View toolbar, so this duplicate yields before the zoom tools.
 const PAPER_SCALE_PRIORITY: i32 = 0;
+/// Duplicate and Tile on a view's bar: the first optional tools a narrow bar lets go, below
+/// every zoom tool and the paper scale. Each is in the bar's shortcut menu and the View and
+/// Window menus at any width, and a view narrow enough to lose them is one that is already
+/// sharing the workspace.
+const ARRANGE_PRIORITY: i32 = -1;
+/// The bar's Duplicate button: a copy of the view beside it, and the views tiled.
+pub const DUPLICATE_BUTTON: &str = "ViewDuplicateButton";
+/// The bar's Tile button: the open views tiled in a grid, as View > Viewport Layout > Tile.
+pub const TILE_BUTTON: &str = "ViewTileButton";
 
 /// The kinds the switcher offers, in its order.
 const KINDS: [ViewKind; 4] = [
@@ -194,6 +214,26 @@ pub fn tiling_actions() -> Vec<Action> {
         .collect()
 }
 
+/// The line Duplicate hands the window's executor (the owner's request of 2026-11-25 for "a
+/// button to duplicate the view and tile the views"): a copy of view `id` beside it, then the
+/// views tiled in a grid, in one line - one entry in the log, one reply. None copies the active
+/// view, by the verb's own rule, as View > Viewport Layout's and the Window menu's item do.
+pub fn duplicate_line(id: Option<ViewId>) -> String {
+    match id {
+        Some(id) => format!("VIEWS DUPLICATE {id} TILE"),
+        None => String::from("VIEWS DUPLICATE TILE"),
+    }
+}
+
+/// Duplicate as a menu's row named `name`, for the view `which` names ("this view", "the active
+/// view"): one wording for the bar's button and every menu's item.
+pub fn duplicate_action(name: &str, which: &str) -> Action {
+    Action::new(name, "Duplicate View").icon("Copy").tip(&format!(
+        "Open a copy of {which} beside it, looking where it looks and hiding the layers it \
+         hides, then tile the open views (VIEWS DUPLICATE ... TILE)"
+    ))
+}
+
 /// A view's title bar menu as a drive target: a step presses one of its items in it.
 pub const BAR_MENU: &str = "ViewBarMenu";
 /// Its own items, by object name: what the bar's window buttons do, for the view it was opened on.
@@ -201,6 +241,8 @@ pub const BAR_MENU_FLOAT: &str = "viewBarFloat";
 pub const BAR_MENU_MINIMISE: &str = "viewBarMinimise";
 pub const BAR_MENU_MAXIMISE: &str = "viewBarMaximise";
 pub const BAR_MENU_CLOSE: &str = "viewBarClose";
+/// The menu's Duplicate View, for the view it was opened on.
+pub const BAR_MENU_DUPLICATE: &str = "viewBarDuplicate";
 
 /// The most views a saved session may name. More than anyone arranges on purpose - the tilings'
 /// own cases stop at twelve, and thirty-two tiled in the headless window's 794 point drawing area
@@ -257,6 +299,42 @@ pub fn dock_name(id: ViewId) -> String {
 /// this one definition.
 pub fn floating_view_area(id: ViewId) -> egui::Id {
     egui::Id::new(("katanaFloatingView", id))
+}
+
+/// The egui viewport floating view `id` is a window of its own in, on the desktop.
+pub fn view_viewport(id: ViewId) -> ViewportId {
+    ViewportId::from_hash_of(("katanaViewWindow", id))
+}
+
+/// A floating view's own window, as the main window is to show it this frame
+/// (`ViewWorkspace::view_windows`): the egui viewport and what it is opened with.
+#[derive(Clone, Debug)]
+pub struct ViewWindow {
+    pub view: ViewId,
+    pub viewport: ViewportId,
+    pub builder: ViewportBuilder,
+}
+
+/// What the workspace keeps of a floating view's own window between frames.
+#[derive(Clone, Debug)]
+struct OwnWindow {
+    /// What the window was opened with, its place and size as they were then. egui sends the
+    /// window a command for every part of a builder that differs from the last frame's, so the
+    /// place stays the one it opened at - one given afresh each frame from the rectangle read
+    /// back would chase the window the person is moving. Only the title follows the view.
+    builder: ViewportBuilder,
+    /// The rectangle the record had when this window last put it there or was put by it, in the
+    /// workspace's points. A record that differs was moved by something else - a drive, a
+    /// session restored - and the window is moved to it.
+    placed: Rect,
+    /// Whether the window was last asked to be maximised.
+    maximised: bool,
+}
+
+/// Whether two rectangles are one place to within half a point: a window's rectangle comes back
+/// rounded to the screen's pixels, which at 1.25 or 1.5 pixels a point move it by less.
+fn same_place(a: Rect, b: Rect) -> bool {
+    (a.min - b.min).length() < 0.5 && (a.size() - b.size()).length() < 0.5
 }
 
 fn dock_id(name: &str) -> Option<ViewId> {
@@ -432,6 +510,14 @@ struct Inner {
     fixed: BTreeMap<ViewId, (i32, i32)>,
     /// How many moves each plan view has reported to the workspace.
     reported: BTreeMap<ViewId, usize>,
+    /// Whether a floating view is a window of its own on the desktop, as the last frame found
+    /// egui (`!Context::embed_viewports`); false headless, where it is drawn in the workspace.
+    own_windows: bool,
+    /// The workspace's top left on the screen, in points, as the last frame found it: what a
+    /// floating view's own window is placed by, and its rectangle read back by.
+    screen_origin: Pos2,
+    /// The floating views' own windows, by view.
+    windows: BTreeMap<ViewId, OwnWindow>,
 }
 
 /// The workspace's state, shared with the verbs' host (see the module comment).
@@ -606,6 +692,25 @@ impl Inner {
         )
     }
 
+    /// Floating, in a window of its own on the desktop (see the module comment).
+    fn windowed(&self, id: ViewId) -> bool {
+        self.own_windows && self.floating(id)
+    }
+
+    /// Where a view's dock is drawn, in the points of the window it is drawn in: the whole of its
+    /// own window from that window's corner, for a view in one; its place in the main window
+    /// otherwise. What a menu or a popup of its bar opens by. None for a view not in the dock
+    /// area, or before the first draw.
+    fn drawn_at(&self, id: ViewId) -> Option<Rect> {
+        if self.windowed(id) {
+            return self
+                .float_rect(id)
+                .map(|rect| Rect::from_min_size(Pos2::ZERO, rect.size()));
+        }
+        let origin = self.area?.min.to_vec2();
+        self.place_of(id).map(|place| place.translate(origin))
+    }
+
     /// The workspace's size as last drawn; nothing before the first draw.
     fn room(&self) -> Vec2 {
         self.area.map_or(Vec2::ZERO, |area| area.size())
@@ -666,8 +771,13 @@ impl Inner {
     }
 
     /// A press on a floating view's title bar picks it up, by where on the bar the pointer is.
-    /// A maximised view fills the workspace and is not moved.
+    /// A maximised view fills the workspace and is not moved; a view in a window of its own is
+    /// moved by the system's frame of that window.
     fn begin_float_drag(&mut self, id: ViewId) {
+        if self.windowed(id) {
+            self.float_drag = None;
+            return;
+        }
         let maximised = self
             .chrome
             .as_ref()
@@ -842,6 +952,27 @@ impl Inner {
         bar.add_tool(
             TitleBarButton::new("ViewZoomExtentsButton", "ZoomExtents", "Zoom Extents", ""),
             ALWAYS,
+        );
+        // Arranging, after the zoom tools: a second look at this view, and every view in its
+        // own place. Each is one line through the window's executor (duplicate_line, TILINGS).
+        let duplicate = duplicate_action(DUPLICATE_BUTTON, "this view");
+        bar.add_tool(
+            TitleBarButton::new(
+                DUPLICATE_BUTTON,
+                duplicate.icon,
+                &duplicate.text,
+                &format!(
+                    "Open a copy of this view beside it, looking where it looks and hiding the \
+                     layers it hides, then tile the open views ({})",
+                    duplicate_line(Some(id))
+                ),
+            ),
+            ARRANGE_PRIORITY,
+        );
+        let (_, _, icon, tip) = TILINGS[0];
+        bar.add_tool(
+            TitleBarButton::new(TILE_BUTTON, icon, "Tile Views", tip),
+            ARRANGE_PRIORITY,
         );
         self.update_bar(views, id);
     }
@@ -1358,6 +1489,42 @@ impl Inner {
             let id = set.add(kind).id;
             (id, set.active_id())
         };
+        self.dock_new_view(views, id, (previous != id).then_some(previous), activate_it, cx);
+        id
+    }
+
+    /// VIEWS DUPLICATE: a copy of view `id` (ViewSet::duplicate) docked beside it, as a new view
+    /// is docked beside the active one, and made the active view. NotFound for a view not open.
+    fn duplicate_view(&mut self, views: &RefCell<ViewSet>, id: ViewId) -> Result<ViewId> {
+        if self.find(id).is_none() {
+            return Err(no_such_view(id));
+        }
+        // A split made while the other views were hidden would be made against the wrong
+        // neighbours.
+        if let Some(chrome) = &mut self.chrome {
+            chrome.unmaximise_docked(&mut self.layout);
+        }
+        let copy = views.borrow_mut().duplicate(id)?;
+        self.dock_new_view(views, copy, Some(id), true, None);
+        Ok(copy)
+    }
+
+    /// View `id`, just added to the set, given a dock: `beside` view's place split into equal
+    /// halves along its longer side when that view is docked, else a place on its own - no view
+    /// docked, or `beside` floating or in the tray. Its widget is made when `cx` is lent, else at
+    /// the next call that lends the drawing.
+    fn dock_new_view(
+        &mut self,
+        views: &RefCell<ViewSet>,
+        id: ViewId,
+        beside: Option<ViewId>,
+        activate_it: bool,
+        cx: Option<&mut (dyn PlanViewHost + '_)>,
+    ) {
+        let kind = views
+            .borrow()
+            .find(id)
+            .map_or(ViewKind::Plan, |state| state.kind);
         self.docks.push(View {
             id,
             plan: None,
@@ -1365,7 +1532,6 @@ impl Inner {
             section: None,
         });
         let tab = ViewTab(dock_name(id));
-        let beside = (previous != id).then_some(previous);
         let beside_path = beside
             .and_then(|beside| self.path_of(beside))
             .filter(|path| path.surface.is_main());
@@ -1441,7 +1607,6 @@ impl Inner {
         self.update_active_marks(views);
         self.relayout(views);
         self.push(WorkspaceEvent::ViewsChanged);
-        id
     }
 
     /// A dock where no docked view is to split: the dock area's first place. A dock area with no
@@ -2248,6 +2413,17 @@ impl ViewVerbHost for Shared {
         }
         Ok(self.inner.borrow_mut().tile(&self.views, kind))
     }
+
+    fn duplicate(&self, id: ViewId) -> Result<ViewId> {
+        if self.mode.get() == HostMode::Record {
+            let mut scratch = self.scratch.borrow_mut();
+            let copy = scratch.duplicate(id)?;
+            scratch.activate(copy)?;
+            return Ok(copy);
+        }
+        // Its widget is made when the drawing is next lent: the verbs hold it now.
+        self.inner.borrow_mut().duplicate_view(&self.views, id)
+    }
 }
 
 impl Shared {
@@ -2429,6 +2605,9 @@ impl ViewWorkspace {
             references: BTreeSet::new(),
             fixed: BTreeMap::new(),
             reported: BTreeMap::new(),
+            own_windows: false,
+            screen_origin: Pos2::ZERO,
+            windows: BTreeMap::new(),
         };
         let shared = Rc::new(Shared {
             views: Rc::new(RefCell::new(ViewSet::new())),
@@ -2607,11 +2786,15 @@ impl ViewWorkspace {
         if !inner.floating(id) || !rect.is_finite() || !rect.is_positive() {
             return false;
         }
-        let room = inner.room();
+        // A view in a window of its own may be anywhere on the desktop: its own window is moved
+        // there at its next frame (follow_window). One drawn in the workspace is kept in reach.
+        let rect = if inner.windowed(id) {
+            rect
+        } else {
+            kept_in_reach(rect, inner.room())
+        };
         let placed = match &mut inner.chrome {
-            Some(chrome) if !chrome.is_maximised(&name) => {
-                chrome.set_float_rect(&name, kept_in_reach(rect, room))
-            }
+            Some(chrome) if !chrome.is_maximised(&name) => chrome.set_float_rect(&name, rect),
             _ => false,
         };
         if placed {
@@ -3565,10 +3748,11 @@ impl ViewWorkspace {
                 return false;
             }
             let origin = inner.area.map_or(Pos2::ZERO, |area| area.min);
-            // Docked or floating: under the view's own bar, where its Layers button is.
-            inner.place_of(id).map_or(origin, |place| {
-                origin + Vec2::new(place.max.x, place.min.y + BAR_HEIGHT)
-            })
+            // Docked, floating or in a window of its own: under the view's own bar, where its
+            // Layers button is, in the window the view is drawn in.
+            inner
+                .drawn_at(id)
+                .map_or(origin, |at| Pos2::new(at.max.x, at.min.y + BAR_HEIGHT))
         };
         let popup = ViewLayersPopup::new(self, document, reference, id, anchor);
         *self.shared.popup.borrow_mut() = Some(popup);
@@ -3654,9 +3838,10 @@ impl ViewWorkspace {
         }
         inner.activate(self.views_cell(), id);
         let origin = inner.area.map_or(Pos2::ZERO, |area| area.min);
-        let under_bar = inner.place_of(id).map_or(origin, |place| {
-            origin + place.min.to_vec2() + Vec2::new(6.0, BAR_HEIGHT)
-        });
+        // In the window the view is drawn in: its own, when it has one.
+        let under_bar = inner
+            .drawn_at(id)
+            .map_or(origin, |at| at.min + Vec2::new(6.0, BAR_HEIGHT));
         inner.kind_menu = None;
         inner.bar_menu = Some((id, at.unwrap_or(under_bar)));
         true
@@ -3695,6 +3880,9 @@ impl ViewWorkspace {
             BAR_MENU_MINIMISE => self.chrome_request(host, scenery, ChromeRequest::Minimise(dock)),
             BAR_MENU_MAXIMISE => self.chrome_request(host, scenery, ChromeRequest::Maximise(dock)),
             BAR_MENU_CLOSE => self.chrome_request(host, scenery, ChromeRequest::Close(dock)),
+            BAR_MENU_DUPLICATE => {
+                let _ = host.run(&duplicate_line(Some(id)));
+            }
             _ => {
                 if let Some(line) = tiling_line(name) {
                     let _ = host.run(&line);
@@ -3766,6 +3954,20 @@ impl ViewWorkspace {
             let mut inner = self.inner();
             let views = self.views_cell();
             let ppp = ui.ctx().pixels_per_point();
+            // Whether a floating view is a window of its own this frame, and where the workspace
+            // is on the screen for those that are. An egui with no windows to give embeds them.
+            inner.own_windows = !ui.ctx().embed_viewports();
+            let corner = ui.input(|input| input.viewport().inner_rect.map(|rect| rect.min));
+            inner.screen_origin = corner.unwrap_or(Pos2::ZERO) + area.min.to_vec2();
+            {
+                let open: Vec<ViewId> = inner
+                    .docks
+                    .iter()
+                    .map(|view| view.id)
+                    .filter(|&id| inner.windowed(id))
+                    .collect();
+                inner.windows.retain(|id, _| open.contains(id));
+            }
             if inner.area != Some(area) || inner.pixels_per_point != ppp {
                 inner.area = Some(area);
                 inner.pixels_per_point = ppp;
@@ -3788,11 +3990,110 @@ impl ViewWorkspace {
             // view's own settings, the active view), never at each frame: a tool a caller took
             // off a bar stays off, as the C++'s setToolWanted holds.
             draw_docks(&mut inner, views, ui, area, &mut cx, scenery);
-            draw_kind_menu(&mut inner, views, ui, area);
-            draw_bar_menu(&mut inner, views, ui);
+            draw_kind_menu(&mut inner, views, ui, None);
+            draw_bar_menu(&mut inner, views, ui, None);
         }
         self.after_frame(host, scenery);
         self.dialogs_ui(ui, host);
+    }
+
+    /// The floating views that are windows of their own this frame, for the main window to show
+    /// each as egui's immediate viewport and draw it with `window_ui` (docs/desktop.md, "A
+    /// floating view is a window of its own"). A window is opened over the place the view
+    /// floats at, with the system's frame, titled by the view. Headless there are none: egui
+    /// embeds a viewport there, and the workspace draws its floating views itself.
+    pub fn view_windows(&self) -> Vec<ViewWindow> {
+        let mut inner = self.inner();
+        let open: Vec<(ViewId, Rect)> = inner
+            .docks
+            .iter()
+            .filter(|view| inner.windowed(view.id))
+            .filter_map(|view| inner.float_rect(view.id).map(|rect| (view.id, rect)))
+            .collect();
+        let origin = inner.screen_origin.to_vec2();
+        let mut shown = Vec::new();
+        for (id, rect) in open {
+            let title = self
+                .views_cell()
+                .borrow()
+                .find(id)
+                .map(ViewSet::title)
+                .unwrap_or_default();
+            let window = inner.windows.entry(id).or_insert_with(|| OwnWindow {
+                builder: ViewportBuilder::default()
+                    .with_position(rect.min + origin)
+                    .with_inner_size(rect.size())
+                    .with_min_inner_size(LEAST_FLOAT)
+                    .with_resizable(true),
+                placed: rect,
+                maximised: false,
+            });
+            window.builder = window
+                .builder
+                .clone()
+                .with_title(format!("{title} - Katana"));
+            shown.push(ViewWindow {
+                view: id,
+                viewport: view_viewport(id),
+                builder: window.builder.clone(),
+            });
+        }
+        shown
+    }
+
+    /// Floating view `id` drawn in its own window, `ui` being that window's whole inside: its bar
+    /// and its widget, the kind menu, the bar's menu and the Layers popup of this view; then what
+    /// was pressed there is done, as `ui` does for the main window. The window's rectangle is the
+    /// view's record (follow_window), and the system's close button docks the view back where it
+    /// came from: closing a window loses no view, and the bar's Close is the one that closes it.
+    pub fn window_ui(&self, ui: &mut Ui, id: ViewId, host: &mut dyn Host, scenery: Scenery<'_>) {
+        let area = ui.max_rect();
+        ui.painter()
+            .rect_filled(area, 0.0, palette::window().to_egui());
+        let (closing, inside, outside) = ui.input(|input| {
+            let viewport = input.viewport();
+            (
+                viewport.close_requested(),
+                viewport.inner_rect,
+                viewport.outer_rect,
+            )
+        });
+        {
+            let mut cx = HostDrawing {
+                host: &mut *host,
+                meshes: scenery.meshes,
+            };
+            let mut inner = self.inner();
+            let views = self.views_cell();
+            // Docked, minimised or closed since the main window listed it.
+            if !inner.windowed(id) {
+                return;
+            }
+            inner.follow_window(views, ui.ctx(), id, inside, outside);
+            // The pointer in this window's points, for what its presses ask after the frame.
+            inner.pointer = ui.input(|input| input.pointer.interact_pos());
+            draw_dock(&mut inner, views, ui, area, id, &mut cx, scenery);
+            draw_kind_menu(&mut inner, views, ui, Some(id));
+            draw_bar_menu(&mut inner, views, ui, Some(id));
+        }
+        self.after_frame(host, scenery);
+        let popup_here = self
+            .shared
+            .popup
+            .borrow()
+            .as_ref()
+            .is_some_and(|popup| popup.view() == id);
+        if popup_here {
+            let _ = self.with_layers_popup(|popup, workspace| popup.ui(ui, workspace, host));
+        }
+        if closing && self.inner().windowed(id) {
+            self.toggle_floating(id);
+        }
+    }
+
+    /// Whether floating view `id` is a window of its own (see `view_windows`).
+    pub fn is_windowed(&self, id: ViewId) -> bool {
+        self.inner().windowed(id)
     }
 
     /// What the frame's presses asked, carried out once nothing is drawn.
@@ -3916,15 +4217,34 @@ impl ViewWorkspace {
                     "ViewZoomExtentsButton" => {
                         let _ = host.run(&format!("ZOOM EXTENTS view={id}"));
                     }
+                    DUPLICATE_BUTTON => {
+                        let _ = host.run(&duplicate_line(Some(id)));
+                    }
+                    TILE_BUTTON => {
+                        if let Some(line) = tiling_line(TILINGS[0].1) {
+                            let _ = host.run(&line);
+                        }
+                    }
                     _ => {}
                 }
             }
         }
     }
 
-    /// The Layers popup and the Paper Style Scale dialog, drawn after the docks.
+    /// The Layers popup and the Paper Style Scale dialog, drawn after the docks. The popup of a
+    /// view in a window of its own is drawn in that window (`window_ui`), under its button.
     fn dialogs_ui(&self, ui: &mut Ui, host: &mut dyn Host) {
-        let _ = self.with_layers_popup(|popup, workspace| popup.ui(ui, workspace, host));
+        let elsewhere = {
+            let inner = self.inner();
+            self.shared
+                .popup
+                .borrow()
+                .as_ref()
+                .is_some_and(|popup| inner.windowed(popup.view()))
+        };
+        if !elsewhere {
+            let _ = self.with_layers_popup(|popup, workspace| popup.ui(ui, workspace, host));
+        }
         let dialog = self.inner().scale_dialog.take();
         if let Some(mut dialog) = dialog {
             dialog.ui(ui, host);
@@ -3934,6 +4254,69 @@ impl ViewWorkspace {
 }
 
 impl Inner {
+    /// Floating view `id`'s record and its own window kept as one, at a frame of that window:
+    /// `inside` and `outside` its rectangle on the screen without and with the system's frame,
+    /// as egui read them (None before the window is made). A maximise of the bar's asks the
+    /// window to be maximised, and its Restore to be restored, the record left as the chrome
+    /// keeps it meanwhile; a record that something else moved (a drive, a saved session) moves
+    /// the window to it; otherwise the record follows the window wherever the person put it.
+    fn follow_window(
+        &mut self,
+        views: &RefCell<ViewSet>,
+        ctx: &egui::Context,
+        id: ViewId,
+        inside: Option<Rect>,
+        outside: Option<Rect>,
+    ) {
+        let name = dock_name(id);
+        let Some(record) = self.float_rect(id) else {
+            return;
+        };
+        let maximised = self
+            .chrome
+            .as_ref()
+            .is_some_and(|chrome| chrome.is_maximised(&name));
+        let origin = self.screen_origin.to_vec2();
+        let Some(window) = self.windows.get_mut(&id) else {
+            return;
+        };
+        if maximised != window.maximised {
+            ctx.send_viewport_cmd(ViewportCommand::Maximized(maximised));
+            window.maximised = maximised;
+            return;
+        }
+        // Maximised, the record is the chrome's stand-in until Restore gives the old one back.
+        if maximised {
+            return;
+        }
+        if !same_place(record, window.placed) {
+            // The system's frame is outside the rectangle kept: the window's corner is put that
+            // far above and left of where the record's goes.
+            let frame = match (inside, outside) {
+                (Some(inside), Some(outside)) => inside.min - outside.min,
+                _ => Vec2::ZERO,
+            };
+            ctx.send_viewport_cmd(ViewportCommand::InnerSize(record.size()));
+            ctx.send_viewport_cmd(ViewportCommand::OuterPosition(
+                record.min + origin - frame,
+            ));
+            window.placed = record;
+            return;
+        }
+        let Some(inside) = inside else {
+            return;
+        };
+        let actual = inside.translate(-origin);
+        if same_place(actual, record) || !actual.is_finite() || !actual.is_positive() {
+            return;
+        }
+        window.placed = actual;
+        if let Some(chrome) = &mut self.chrome {
+            let _ = chrome.set_float_rect(&name, actual);
+        }
+        self.relayout(views);
+    }
+
     /// The first view's widget, made from the drawing alone, before any host is lent: a plan view
     /// is made from a read of it.
     fn build_first(&mut self, views: &RefCell<ViewSet>, id: ViewId, document: &Document) {
@@ -3994,6 +4377,10 @@ impl Inner {
             .push(MenuItem::Section(String::from("Arrange the open views")));
         menu.items
             .extend(tiling_actions().into_iter().map(MenuItem::Action));
+        menu.items.push(MenuItem::Action(duplicate_action(
+            BAR_MENU_DUPLICATE,
+            "this view",
+        )));
         Some(menu)
     }
 
@@ -4248,11 +4635,13 @@ fn draw_docks(
     // the workspace as it is now; any other is brought where its bar can be reached, which a
     // workspace made smaller since (a panel shown, the window narrowed, a session restored on a
     // smaller screen) may have left it out of.
+    // A view in a window of its own is drawn there (ViewWorkspace::window_ui), and is not kept in
+    // reach of the workspace: it may be anywhere on the desktop.
     let floating: Vec<ViewId> = inner
         .docks
         .iter()
         .map(|view| view.id)
-        .filter(|&id| inner.floating(id))
+        .filter(|&id| inner.floating(id) && !inner.windowed(id))
         .collect();
     for id in floating {
         let Some(kept) = inner.float_rect(id) else {
@@ -4388,6 +4777,15 @@ fn draw_widget(
 /// The kind switcher's menu as a drive target: a step presses one of its kinds in it.
 pub const KIND_MENU: &str = "ViewKindMenu";
 
+/// Whether a menu of view `id`'s bar is drawn in the window being drawn: the view's own window
+/// for a view in one (`window` is that view), the main window (`window` None) for any other.
+fn drawn_here(inner: &Inner, id: ViewId, window: Option<ViewId>) -> bool {
+    match window {
+        Some(window) => window == id,
+        None => !inner.windowed(id),
+    }
+}
+
 /// The tip of each kind in the kind switcher's menu, as View > Active Viewport Shows words it for
 /// the active view.
 fn kind_tip(kind: ViewKind) -> &'static str {
@@ -4402,19 +4800,28 @@ fn kind_tip(kind: ViewKind) -> &'static str {
 /// The kind switcher's menu of the view it was opened on: a click on a kind changes the view. It
 /// is drawn as every menu of the window is - egui's menu frame, each kind an action item
 /// ("viewKindPlan" ...) with its icon and the view's own kind ticked - where it was four framed
-/// buttons with neither. A click outside it closes it, as a menu's does.
-fn draw_kind_menu(inner: &mut Inner, views: &RefCell<ViewSet>, ui: &mut Ui, area: Rect) {
+/// buttons with neither. A click outside it closes it, as a menu's does. Drawn in the window its
+/// view is drawn in: `window` names the view whose own window `ui` is, None the main window.
+fn draw_kind_menu(
+    inner: &mut Inner,
+    views: &RefCell<ViewSet>,
+    ui: &mut Ui,
+    window: Option<ViewId>,
+) {
     let Some(id) = inner.kind_menu else {
         return;
     };
+    if !drawn_here(inner, id, window) {
+        return;
+    }
     // A floating view's switcher opens its menu too: asked of the docked places alone, the menu
     // of a floating view never opened.
-    let Some(at) = inner.place_of(id) else {
+    let Some(at) = inner.drawn_at(id) else {
         inner.kind_menu = None;
         return;
     };
     let shows = views.borrow().find(id).map(|state| state.kind);
-    let origin = area.min + at.min.to_vec2() + Vec2::new(6.0, BAR_HEIGHT);
+    let origin = at.min + Vec2::new(6.0, BAR_HEIGHT);
     let mut chosen = None;
     let shown = crate::shell::popup_menu(ui.ctx(), KIND_MENU, origin, |ui| {
         // The look egui gives a menu it opens itself: items framed only under the pointer.
@@ -4449,11 +4856,20 @@ fn draw_kind_menu(inner: &mut Inner, views: &RefCell<ViewSet>, ui: &mut Ui, area
 
 /// The shortcut menu of the title bar it was opened on (`BAR_MENU`), drawn as every menu of the
 /// window is: a click on an item is carried out after the frame (`trigger_bar_menu`), a click
-/// outside it closes it, as a menu's does.
-fn draw_bar_menu(inner: &mut Inner, views: &RefCell<ViewSet>, ui: &mut Ui) {
+/// outside it closes it, as a menu's does. Drawn in the window its view is drawn in, as the kind
+/// menu is.
+fn draw_bar_menu(
+    inner: &mut Inner,
+    views: &RefCell<ViewSet>,
+    ui: &mut Ui,
+    window: Option<ViewId>,
+) {
     let Some((id, at)) = inner.bar_menu else {
         return;
     };
+    if !drawn_here(inner, id, window) {
+        return;
+    }
     // Closed meanwhile, its view has no menu.
     let Some(menu) = inner.bar_menu_rows(views, id) else {
         inner.bar_menu = None;

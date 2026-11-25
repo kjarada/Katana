@@ -428,6 +428,7 @@ mod view_tiling {
                 "viewTile",
                 "viewTileSideBySide",
                 "viewTileStacked",
+                "viewDuplicate",
                 "[Presets]",
                 "viewLayoutSingle",
                 "viewLayoutSplitVertical",

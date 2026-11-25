@@ -6,7 +6,7 @@
 // at s pixels a unit shows x from c.x - W/2s to c.x + W/2s and y likewise -
 // never read back from a run.
 
-use std::cell::{Ref, RefCell};
+use std::cell::{Cell, Ref, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
@@ -53,6 +53,10 @@ struct RecordingHost {
     // tiling docks and what it leaves in the tray.
     floating: RefCell<BTreeSet<ViewId>>,
     minimised: RefCell<BTreeSet<ViewId>>,
+    // The views copied (VIEWS DUPLICATE), in order; and whether this host has a dock area to
+    // open a copy in - a host with none takes the trait's default, a refusal.
+    duplicated: RefCell<Vec<ViewId>>,
+    no_dock_area: Cell<bool>,
 }
 
 impl ViewVerbHost for RecordingHost {
@@ -141,6 +145,19 @@ impl ViewVerbHost for RecordingHost {
             docked,
             minimised: minimised.len(),
         })
+    }
+
+    // What the window's workspace does, minus the dock: the copy made by the set and made
+    // active, as VIEWS OPEN's view is.
+    fn duplicate(&self, id: ViewId) -> Result<ViewId> {
+        if self.no_dock_area.get() {
+            return Err(Error::new(ErrorCode::Unsupported, "no dock area here"));
+        }
+        self.duplicated.borrow_mut().push(id);
+        let mut set = self.set.borrow_mut();
+        let copy = set.duplicate(id)?;
+        set.activate(copy)?;
+        Ok(copy)
     }
 }
 
@@ -866,6 +883,135 @@ mod view_verbs_test {
         assert!(t.host.tiles.borrow().is_empty());
     }
 
+    // ---- VIEWS DUPLICATE ------------------------------------------------------------------------
+
+    #[test]
+    fn views_duplicate_opens_a_copy_of_the_named_view_makes_it_active_and_names_both() {
+        let mut t = ViewVerbsTest::new();
+        let plan = t.plan();
+        let model = t.add(ViewKind::Model3D);
+        if let Some(view) = t.host.set.borrow_mut().find_mut(model) {
+            view.camera.set_target(Point3::new(1.0, 2.0, 3.0));
+        }
+        assert!(
+            t.host
+                .set
+                .borrow_mut()
+                .find_mut(plan)
+                .is_some_and(|view| view.layers.hide("survey"))
+        );
+        t.ok("VIEWS ACTIVATE 2");
+
+        let reply = t.ok("VIEWS DUPLICATE 1");
+        // The copy is view 3, Plan 2 (Plan 1 is still open), and looks where view 1 looks: 300 x
+        // 200 at 4 px a unit about (10, 20) is x 10 -+ 37.5 and y 20 -+ 25, as VIEWS lists view 1.
+        // It hides what view 1 hides, and is the active view now.
+        assert_eq!(
+            lines_of(&reply),
+            [
+                "duplicated=1 copy=3",
+                "view=3 kind=plan title=\"Plan 2\" active=yes linked=no centre=10,20 scale=4 \
+                 area=-27.5,-5,47.5,45 ghosts=on hidden=survey",
+            ]
+        );
+        assert_eq!(*t.host.duplicated.borrow(), [plan]);
+        assert_eq!(t.host.set.borrow().active_id(), 3);
+        // Nothing was arranged: TILE was not asked for.
+        assert!(t.host.tiles.borrow().is_empty());
+        // A copy of the 3D view is a 3D view; with no id the active view is the one copied.
+        t.ok("VIEWS ACTIVATE 2");
+        let reply = t.ok("views duplicate");
+        let lines = lines_of(&reply);
+        assert_eq!(lines[0], format!("duplicated={model} copy=4"));
+        assert!(
+            lines[1].starts_with("view=4 kind=3d title=\"3D 2\" active=yes target=1,2,3"),
+            "{}",
+            lines[1]
+        );
+        // The window's views, not the drawing: nothing to undo and nothing to save.
+        assert_eq!(t.document.history().undo_count(), 0);
+        assert!(!t.document.is_modified());
+    }
+
+    #[test]
+    fn views_duplicate_with_tile_arranges_the_views_after_the_copy_in_one_line() {
+        let mut t = ViewVerbsTest::new();
+        t.plan();
+        t.add(ViewKind::Section);
+        t.host.floating.borrow_mut().insert(2);
+
+        let reply = t.ok("VIEWS DUPLICATE 1 TILE");
+        let lines = lines_of(&reply);
+        assert_eq!(lines.len(), 3, "{reply}");
+        assert_eq!(lines[0], "duplicated=1 copy=3");
+        assert!(
+            lines[1].starts_with("view=3 kind=plan title=\"Plan 2\" active=yes"),
+            "{}",
+            lines[1]
+        );
+        // Three views arranged after the copy was made - the copy among them - the floating
+        // section docked; TILE alone is the grid.
+        assert_eq!(lines[2], "tiled=3 kind=grid docked=1 minimised=0");
+        // The tiling's word, as VIEWS TILE takes it, and with no id the active view: the copy.
+        let reply = t.ok("VIEWS DUPLICATE TILE columns");
+        let lines = lines_of(&reply);
+        assert_eq!(lines[0], "duplicated=3 copy=4");
+        assert_eq!(lines[2], "tiled=4 kind=columns docked=0 minimised=0");
+        assert_eq!(*t.host.tiles.borrow(), [TileKind::Grid, TileKind::Columns]);
+        assert_eq!(*t.host.duplicated.borrow(), [1, 3]);
+    }
+
+    #[test]
+    fn views_duplicate_refuses_before_it_asks_the_window_for_anything() {
+        let mut t = ViewVerbsTest::new();
+        // No view open, and none named: nothing to copy.
+        let none = t.refused("VIEWS DUPLICATE");
+        assert_eq!(none.code, ErrorCode::InvalidState);
+        assert!(none.message.contains("VIEWS OPEN plan"), "{}", none.message);
+        t.plan();
+        // A view that is not open, and a word that is no id.
+        let absent = t.refused("VIEWS DUPLICATE 7");
+        assert_eq!(absent.code, ErrorCode::NotFound);
+        assert_eq!(absent.message, "no view 7 is open (VIEWS lists them)");
+        assert_eq!(
+            t.refused("VIEWS DUPLICATE Plan1").code,
+            ErrorCode::ParseFailure
+        );
+        assert_eq!(
+            t.refused("VIEWS DUPLICATE 0").code,
+            ErrorCode::ParseFailure
+        );
+        // TILE's words as VIEWS TILE refuses them, and anything after.
+        let word = t.refused("VIEWS DUPLICATE 1 TILE diagonal");
+        assert_eq!(word.code, ErrorCode::ParseFailure);
+        assert_eq!(
+            word.message,
+            "VIEWS TILE takes GRID, COLUMNS or ROWS, not 'diagonal'"
+        );
+        for line in [
+            "VIEWS DUPLICATE 1 2",
+            "VIEWS DUPLICATE 1 TILE GRID ROWS",
+            "VIEWS DUPLICATE TILE GRID 1",
+        ] {
+            let extra = t.refused(line);
+            assert_eq!(extra.code, ErrorCode::ParseFailure, "{line}");
+            assert!(
+                extra.message.starts_with("VIEWS does not take '"),
+                "{line}: {}",
+                extra.message
+            );
+        }
+        // Every refusal came before the window was asked: no copy, no tiling, one view.
+        assert!(t.host.duplicated.borrow().is_empty());
+        assert!(t.host.tiles.borrow().is_empty());
+        assert_eq!(t.host.set.borrow().size(), 1);
+        // A host with no dock area refuses it, saying so, and made nothing either.
+        t.host.no_dock_area.set(true);
+        let undocked = t.refused("VIEWS DUPLICATE 1");
+        assert_eq!(undocked.code, ErrorCode::Unsupported);
+        assert_eq!(t.host.set.borrow().size(), 1);
+    }
+
     #[test]
     fn the_tiling_words_go_both_ways_and_nothing_else_reads_as_one() {
         for kind in katana_cad::viewport_layout::TILE_KINDS {
@@ -926,6 +1072,8 @@ mod view_verbs_test {
             ("VIEWS MESHES footprint", "VIEWS"),
             ("VIEWS TILE", "VIEWS"),
             ("VIEWS TILE ROWS", "VIEWS"),
+            ("VIEWS DUPLICATE", "VIEWS"),
+            ("VIEWS DUPLICATE 1 TILE", "VIEWS"),
             ("ZOOM", "ZOOM"),
             ("Z", "ZOOM"),
             ("ZOOM IN view=1", "ZOOM"),

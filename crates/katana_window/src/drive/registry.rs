@@ -31,8 +31,17 @@
 //! The registry lives in an egui plugin (`Drive`), so a control reaches it through its `Ui` alone,
 //! and a pass's records are reset as the pass begins. Never hold the plugin's lock across a call
 //! into egui: a control takes its act, unlocks, draws, and then records.
+//!
+//! ONE FRAME, THE MAIN WINDOW'S. A floating view on the desktop is a window of its own, an egui
+//! immediate viewport, whose pass egui runs INSIDE the main window's - between its begin and its
+//! end (docs/desktop.md, "A floating view is a window of its own"). A frame begins and ends with
+//! the main window's pass alone: what a view's window draws is recorded into the main window's
+//! frame, as it is drawn, and its pass neither resets that frame nor completes it. Begun and
+//! ended by every pass, a view window's pass wiped what the main window had recorded before it,
+//! and completed a frame of the view's controls alone - the command line, which the keyboard's
+//! pass finds by its record here, was gone from it.
 
-use egui::{Context, Rect, Response, Ui};
+use egui::{Context, Rect, Response, Ui, ViewportId};
 
 use super::mailbox::{ActId, ActOutcome, Mailbox, Posted, Taken};
 
@@ -361,6 +370,10 @@ impl egui::Plugin for Drive {
     }
 
     fn on_begin_pass(&mut self, ui: &mut Ui) {
+        // A view's own window: drawn into the main window's frame (see the module comment).
+        if ui.ctx().viewport_id() != ViewportId::ROOT {
+            return;
+        }
         let screen = ui.ctx().content_rect();
         self.current = Snapshot {
             screen,
@@ -384,7 +397,8 @@ impl egui::Plugin for Drive {
 
     fn on_end_pass(&mut self, ui: &mut Ui) {
         // A pass egui will draw again is not the frame: what it recorded is not what is seen.
-        if ui.ctx().will_discard() {
+        // A view window's pass is part of the main window's frame, which has not ended.
+        if ui.ctx().viewport_id() != ViewportId::ROOT || ui.ctx().will_discard() {
             return;
         }
         self.completed = std::mem::take(&mut self.current);

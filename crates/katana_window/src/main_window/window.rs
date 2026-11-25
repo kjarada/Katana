@@ -703,6 +703,11 @@ impl MainWindow {
                     let _ = exec.run_verb_line(&line);
                 }
             }
+            // The same way: the verb copies the active view, and refuses, saying how to open
+            // one, when no view is open.
+            super::actions::DUPLICATE_VIEW_ACTION => {
+                let _ = exec.run_verb_line(&crate::view_workspace::duplicate_line(None));
+            }
             "viewSelectionGhosts" => {
                 let active = exec.workspace.active_id();
                 match exec.workspace.state(active) {

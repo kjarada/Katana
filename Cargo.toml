@@ -44,8 +44,6 @@ katana_survey = { path = "crates/katana_survey" }
 katana_surveyio = { path = "crates/katana_surveyio" }
 katana_terrain = { path = "crates/katana_terrain" }
 katana_update = { path = "crates/katana_update" }
-katana_updater = { path = "crates/katana_updater" }
-katana_window = { path = "crates/katana_window" }
 # Step 7 (docs/rust.md, "Third-party libraries"): the GPU layer and the window share one wgpu,
 # the one egui-wgpu 0.36 asks for (^30). GLES, WebGPU and WebGL are off: the window draws
 # through Vulkan in WSL and Linux (lavapipe where there is no GPU), Direct3D 12 on Windows.

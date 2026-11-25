@@ -22,7 +22,7 @@ mod view_bar_menu {
 
     use crate::support::Site;
 
-    const ITEMS: [&str; 7] = [
+    const ITEMS: [&str; 8] = [
         "viewBarFloat",
         "viewBarMinimise",
         "viewBarMaximise",
@@ -30,6 +30,7 @@ mod view_bar_menu {
         "viewTile",
         "viewTileSideBySide",
         "viewTileStacked",
+        "viewBarDuplicate",
     ];
 
     /// The plan the workspace starts with, a 3D view and a section, the section active.
@@ -177,6 +178,7 @@ mod view_bar_menu {
                 "viewTile=Tile",
                 "viewTileSideBySide=Tile Side by Side",
                 "viewTileStacked=Tile Stacked",
+                "viewBarDuplicate=Duplicate View",
             ]
         );
         // Every item has an icon and says what it does; no two of the view's own share an icon.
@@ -218,10 +220,12 @@ mod view_bar_menu {
         let w = Site::new();
         let plan = w.active();
         let menu = w.views.bar_menu(plan).expect("the plan has a bar menu");
+        // The tilings by their names, as the two menus below are read: the bar's section holds
+        // Duplicate View after them (the owner's request of 2026-11-25), which is no tiling.
         let in_bar: Vec<Action> = menu
             .actions()
             .into_iter()
-            .skip(4)
+            .filter(|action| action.name.starts_with("viewTile"))
             .cloned()
             .collect();
         assert_eq!(in_bar, tiling_actions());

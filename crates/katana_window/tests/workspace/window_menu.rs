@@ -87,6 +87,7 @@ mod window_menu {
                 "viewTile",
                 "viewTileSideBySide",
                 "viewTileStacked",
+                "viewDuplicate",
                 "[Open views]",
                 "windowView1",
             ]
@@ -95,7 +96,7 @@ mod window_menu {
         let mut window = window_with_three_views();
         let menu = menu_of(&window);
         assert_eq!(
-            rows(&menu)[5..],
+            rows(&menu)[6..],
             ["windowView1", "windowView2", "windowView3"]
         );
         let items = view_items(&menu);
@@ -212,6 +213,46 @@ mod window_menu {
             log.contains("tiled=3 kind=rows docked=0 minimised=0"),
             "{log}"
         );
+    }
+
+    #[test]
+    fn duplicate_view_in_window_copies_the_active_view_beside_it_and_tiles_by_one_line() {
+        // The one action in both menus, as the tilings are.
+        let mut window = window_with_three_views();
+        let in_window = menu_of(&window)
+            .actions()
+            .into_iter()
+            .find(|action| action.name == "viewDuplicate")
+            .cloned()
+            .expect("Window has Duplicate View");
+        let in_view = find_menu(&window.composed().menus, "viewLayoutMenu")
+            .expect("View has Viewport Layout")
+            .actions()
+            .into_iter()
+            .find(|action| action.name == "viewDuplicate")
+            .cloned()
+            .expect("Viewport Layout has Duplicate View");
+        assert_eq!(in_window, in_view);
+        assert_eq!(in_window.text, "Duplicate View");
+        assert_eq!(in_window.icon, "Copy");
+        assert!(in_window.tip.contains("the active view"), "{}", in_window.tip);
+        assert!(in_window.enabled && in_window.shortcut.is_none());
+
+        // The section, opened last, is the active view: it is the one copied, as Section 2, and
+        // the four views are tiled - in the one line, logged with its reply.
+        window.trigger("viewDuplicate").expect("triggered");
+        let log = window.exec.log.text();
+        assert!(log.contains("VIEWS DUPLICATE TILE"), "{log}");
+        assert!(log.contains("duplicated=3 copy=4"), "{log}");
+        assert!(log.contains("tiled=4 kind=grid docked=0 minimised=0"), "{log}");
+        let texts: Vec<String> = view_items(&menu_of(&window))
+            .into_iter()
+            .map(|action| action.text)
+            .collect();
+        assert_eq!(texts, ["Plan 1", "3D 1", "Section 1", "Section 2"]);
+        assert_eq!(window.exec.workspace.active_id(), 4);
+        // The window's views, not the drawing.
+        assert_eq!(window.exec.document.history().undo_count(), 0);
     }
 
     #[test]

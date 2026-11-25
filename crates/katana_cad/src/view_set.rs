@@ -480,6 +480,40 @@ impl ViewSet {
         Ok(self.views[last].as_mut())
     }
 
+    /// A new view showing what view `id` shows, as it shows it (the owner's request of
+    /// 2026-11-25 for a button that duplicates a view): the same kind, looking at the same place
+    /// (its plan pan and zoom, its camera, its section and how that is drawn), hiding the same
+    /// layers and reference layers, and ghosting the selection as it does. The copy has the next
+    /// id and the lowest number its kind has free ("Plan 2"), and is not made active: as add()
+    /// leaves a view, that is the workspace's decision.
+    ///
+    /// Not copied, each for a reason: the link (a view joins one only when asked, VIEWS LINK;
+    /// a copy that joined would move with the view it came from, which is not a second look at
+    /// the drawing but the same one twice); the move clock (the copy has not been moved); and the
+    /// paper-style scale, which is the drawing's and not the view's - an assignment by view id
+    /// saved with the project and undone as an edit (set_view_paper_scales) - so copying it
+    /// would make a copy of a view an edit of the drawing, and it would be lost at the next line
+    /// that restores the assignments. The copy starts at Auto.
+    ///
+    /// NotFound, and nothing added, for an id that is not open.
+    pub fn duplicate(&mut self, id: ViewId) -> Result<ViewId> {
+        let Some(source) = self.find(id) else {
+            return Err(not_open(id));
+        };
+        let source = source.clone();
+        let copy = self.add(source.kind);
+        let (copy_id, number) = (copy.id, copy.number);
+        *copy = ViewState {
+            id: copy_id,
+            number,
+            paper_style_scale: None,
+            linked: false,
+            last_moved: 0,
+            ..source
+        };
+        Ok(copy_id)
+    }
+
     /// Whether `id` has been given out by this set - to a view open now or
     /// closed since, or passed over when restore() opened a later one - so
     /// that a queued event may still name it. restore() itself takes any id

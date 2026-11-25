@@ -2211,7 +2211,7 @@ the C++ column for the record of what each replaced.
 | libcurl, the handle GDAL configures | hand-written declarations on the libcurl GDAL loads; a one-call shim for GDAL's C++-only option setter | gis |
 | OpenSSL (Ed25519 verification with the RFC 8032 checks) | ed25519-dalek and curve25519-dalek | update |
 | zlib (raw inflate) | miniz_oxide | update |
-| Qt | egui, eframe and egui_extras 0.36.2, egui_dock 0.21.1, wgpu 30.0.1, tiny-skia 0.12.0, cosmic-text 0.19.0, krilla 0.8.2, png 0.18.1, image 0.25.10, arboard 3.7.0, rfd 0.17.2, pollster 1.0.1 | window, gpu |
+| Qt | egui and eframe 0.36.2, egui_dock 0.21.1, wgpu 30.0.1, tiny-skia 0.12.0, cosmic-text 0.19.0, krilla 0.8.2, png 0.18.1, image 0.25.10, arboard 3.7.0, rfd 0.17.2, pollster 1.0.1 | window, gpu |
 
 A crate is added to `THIRD_PARTY_NOTICES.md` in the commit that first uses it,
 and must be GPL-3.0-compatible.
@@ -2321,6 +2321,19 @@ what it would take.
   update has yet been applied, rolled back and recovered by the Rust
   updater in a scratch install on Windows; it takes a release built by the
   release workflow to update from and to.
+- **The `views` test binary once ended in a heap corruption on Windows.** On
+  2026-11-25, in one of the day's native Windows runs (MSYS2 UCRT64, Rust
+  1.100.0), `-p katana_window --test views` exited with 0xc0000374
+  (STATUS_HEAP_CORRUPTION) after its desktop GPU cases had passed
+  (`gpu_scene_view::*`, `render_view_gpu::*`, the cases that make a wgpu
+  device); the next whole run passed it, 9,950 of 9,950, and it has not been
+  seen since. Nothing that run changed is in that binary's path. The writer is
+  unknown: a GPU driver's or wgpu's teardown is the first suspect, since it
+  ended after those cases and the views' own code is safe Rust. What it would
+  take: the target run alone and repeatedly with `--test-threads=1` and with
+  the GPU cases alone, under Windows' page heap (`gflags /p /enable` on the
+  test binary), which stops at the first bad write instead of at the free that
+  finds it.
 - **ARM NEON execution waits for an ARM host.** The current WSL gate runs
   x86-64 and proves AVX2/scalar equivalence; NEON source has not been compiled
   or run in this gate.

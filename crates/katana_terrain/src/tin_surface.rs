@@ -685,8 +685,7 @@ impl TinSurface {
 
         // Pass 1: containment by the three edge functions, evaluated on coordinate
         // differences so that large projected coordinates keep their precision.
-        for i in first..last {
-            let t = grid.cell_triangles[i];
+        for &t in &grid.cell_triangles[first..last] {
             let [a, b, c] = self.plan_corners(t as usize);
             let d0 = (b - a).cross(position - a); // weight of c, times twice the area
             let d1 = (c - b).cross(position - b); // weight of a
@@ -711,8 +710,7 @@ impl TinSurface {
         // index first, and interpolate along it.
         let mut best_distance = tolerance::GEOMETRIC;
         let mut best: Option<SurfaceLocation> = None;
-        for i in first..last {
-            let t = grid.cell_triangles[i];
+        for &t in &grid.cell_triangles[first..last] {
             let corners = self.plan_corners(t as usize);
             for k in 0..3 {
                 let edge = Segment2::new(corners[k], corners[(k + 1) % 3]);

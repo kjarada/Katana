@@ -28,6 +28,8 @@ mod start_dialog;
 // Not a twin: a view's title bar shortcut menu.
 mod view_bar_menu;
 mod view_chrome;
+// Not a twin: a copy of a view beside it, and the views tiled (the owner's request of 2026-11-25).
+mod view_duplicate;
 // Not a twin: where a floating view is, through a drag, a maximise and the tray.
 mod view_floating;
 mod view_focus;
@@ -39,6 +41,8 @@ mod view_selection;
 mod view_session;
 // Not a twin: tiling the open views (the owner's request of 2026-11-21).
 mod view_tiling;
+// Not a twin: a floating view as a window of its own on the desktop (2026-11-25).
+mod view_windows;
 // Not a twin: the Window menu.
 mod window_menu;
 mod workspace_tools;

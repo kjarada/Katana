@@ -22,6 +22,8 @@ mod test_window;
 mod chrome;
 mod flyout_button;
 mod program;
+// Not a twin: the registry over a view window's pass, which egui runs inside the main window's.
+mod registry_passes;
 mod soft_rendering;
 mod step_engine;
 mod theme;

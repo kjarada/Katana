@@ -421,6 +421,7 @@ impl MainWindow {
         self.tool_bars_ui(ui, &geometry, &composed);
         self.panels_ui(ui, &geometry);
         self.views_ui(ui, &geometry);
+        self.view_windows_ui(ui, &composed);
         self.menu_panels_ui(ui, &geometry, &composed);
         self.floating_window_panels_ui(ui);
         self.floating_bars_ui(ui, &composed);
@@ -1024,6 +1025,42 @@ impl MainWindow {
         });
     }
 
+    /// The floating views that are windows of their own on the desktop (docs/desktop.md, "A
+    /// floating view is a window of its own"), each shown as egui's immediate viewport - its
+    /// pass run inside this one - with the application's icon. In each, the keys are offered to
+    /// the window's actions first, as they are before anything of the main window is drawn: a
+    /// view's window is the drawing's as much as the main window is, and Ctrl+Z, Delete and F9
+    /// pressed there do what they do here. Headless the workspace lists none.
+    fn view_windows_ui(&mut self, ui: &Ui, composed: &Composed) {
+        let windows = self.exec.workspace.view_windows();
+        if windows.is_empty() {
+            return;
+        }
+        let scene = Rc::clone(&self.exec.scene);
+        let surfaces = scene.surfaces();
+        let meshes = scene.meshes(self.exec.document.model());
+        let workspace = self.exec.workspace.clone();
+        let ctx = ui.ctx().clone();
+        for window in windows {
+            let builder = match view_window_icon() {
+                Some(icon) => window.builder.with_icon(icon),
+                None => window.builder,
+            };
+            ctx.show_viewport_immediate(window.viewport, builder, |ui, _| {
+                self.shortcut_pass(ui, composed);
+                workspace.window_ui(
+                    ui,
+                    window.view,
+                    &mut self.exec,
+                    Scenery {
+                        surfaces: &surfaces,
+                        meshes: &meshes,
+                    },
+                );
+            });
+        }
+    }
+
     /// The status bar (buildStatusBar): the message at the left, the jobs' widget, then the
     /// permanent ones - the update button, the CRS button, the frame stats, the selection count,
     /// the current layer, the snap and the coordinates.
@@ -1604,6 +1641,26 @@ impl MainWindow {
 }
 
 use crate::plotting::plot_dialog::PlotAnswer;
+
+/// The application's icon for a view's own window, as the main window's (drive::desktop): drawn
+/// once, at the first window, since egui compares a window's icon at every frame and a picture
+/// drawn afresh each frame would be drawn sixty times a second for nothing. None when it could
+/// not be drawn: the system's own icon then.
+fn view_window_icon() -> Option<std::sync::Arc<egui::IconData>> {
+    static ICON: std::sync::OnceLock<Option<std::sync::Arc<egui::IconData>>> =
+        std::sync::OnceLock::new();
+    ICON.get_or_init(|| {
+        let icon = crate::icons::application_icon_image(&crate::icons::CanvasRasteriser, 256);
+        (!icon.is_null()).then(|| {
+            std::sync::Arc::new(egui::IconData {
+                rgba: icon.to_straight_rgba8(),
+                width: icon.width(),
+                height: icon.height(),
+            })
+        })
+    })
+    .clone()
+}
 
 /// The window's title: the project's folder name, or Untitled, and "*" while it is modified.
 pub fn window_title(document: &katana_cad::Document) -> String {
