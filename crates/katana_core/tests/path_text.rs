@@ -2,8 +2,9 @@ pub mod support;
 
 // A file made by a narrow name independently of the path converter. On a
 // POSIX system a name is its bytes, which is what the C library's fopen hands
-// open(2), so std's open of the same bytes names the same file.
-#[cfg(unix)]
+// open(2), so std's open of the same bytes names the same file. Not on macOS,
+// whose file systems hold no such name (the case below says what it does).
+#[cfg(all(unix, not(target_os = "macos")))]
 mod narrow_file {
     use std::os::unix::ffi::OsStrExt;
 
@@ -109,9 +110,27 @@ mod path_text {
         }
         let scratch = Scratch::new("katana-core-tests-path-text-narrow-name");
         let directory = WorkingDirectory::enter(&scratch.root);
-        super::narrow_file::write(ansi);
-        let read = read_file_bytes(&path_from_utf8(ansi));
+        // macOS names a file in UTF-8 alone: APFS and HFS+ refuse any other bytes
+        // with EILSEQ, 92 in macOS's errno.h ("Illegal byte sequence"), so no file
+        // of this narrow name can be there - and asked for, the name is a refusal
+        // like any missing file's, not a panic. Found by the first macOS run of
+        // the release, 2026-11-25, where making the file was this case's failure.
+        #[cfg(target_os = "macos")]
+        let read = {
+            use std::os::unix::ffi::OsStrExt;
+            let made = std::fs::write(std::ffi::OsStr::from_bytes(ansi), b"narrow");
+            assert_eq!(made.map_err(|error| error.raw_os_error()), Err(Some(92)));
+            read_file_bytes(&path_from_utf8(ansi))
+        };
+        #[cfg(not(target_os = "macos"))]
+        let read = {
+            super::narrow_file::write(ansi);
+            read_file_bytes(&path_from_utf8(ansi))
+        };
         drop(directory);
+        #[cfg(target_os = "macos")]
+        assert!(read.is_err(), "no file of a narrow name is on a Mac's disk");
+        #[cfg(not(target_os = "macos"))]
         assert_eq!(read.unwrap(), b"narrow");
     }
 

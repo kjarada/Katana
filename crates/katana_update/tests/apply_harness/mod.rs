@@ -381,7 +381,74 @@ mod volume {
     }
 }
 
-#[cfg(not(any(windows, all(target_os = "linux", target_pointer_width = "64"))))]
+#[cfg(target_os = "macos")]
+#[allow(
+    unsafe_code,
+    reason = "statvfs(3) is the free space std::filesystem::space reads; the standard library has \
+              no form of it"
+)]
+mod volume {
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::Path;
+
+    // struct statvfs of macOS (sys/statvfs.h), as the libc crate 0.2.191 declares it for Apple
+    // (src/unix/bsd/apple/mod.rs): unsigned longs round six counts of fsblkcnt_t and fsfilcnt_t,
+    // which are unsigned int there, not glibc's unsigned long - 64 bytes. Declared with Linux's
+    // layout it would read the counts from the wrong places; left undeclared, as it was until the
+    // first macOS run of the release (2026-11-25), every swap in this harness refused with
+    // io_error for want of the free space.
+    #[repr(C)]
+    struct StatVfs {
+        f_bsize: u64,
+        f_frsize: u64,
+        f_blocks: u32,
+        f_bfree: u32,
+        f_bavail: u32,
+        f_files: u32,
+        f_ffree: u32,
+        f_favail: u32,
+        f_fsid: u64,
+        f_flag: u64,
+        f_namemax: u64,
+    }
+    const _: () = assert!(std::mem::size_of::<StatVfs>() == 64);
+
+    unsafe extern "C" {
+        fn statvfs(path: *const std::ffi::c_char, buffer: *mut StatVfs) -> i32;
+    }
+
+    /// What std::filesystem::space calls `available`: the blocks free to an unprivileged user
+    /// times the fragment size.
+    pub fn available(path: &Path) -> std::io::Result<u64> {
+        let name = std::ffi::CString::new(path.as_os_str().as_bytes())
+            .map_err(|_| std::io::Error::from(std::io::ErrorKind::InvalidInput))?;
+        let mut buffer = StatVfs {
+            f_bsize: 0,
+            f_frsize: 0,
+            f_blocks: 0,
+            f_bfree: 0,
+            f_bavail: 0,
+            f_files: 0,
+            f_ffree: 0,
+            f_favail: 0,
+            f_fsid: 0,
+            f_flag: 0,
+            f_namemax: 0,
+        };
+        // SAFETY: `name` is a NUL-terminated string that outlives the call, and `buffer` is a
+        // struct statvfs of the size the system writes (checked above).
+        if unsafe { statvfs(name.as_ptr(), &mut buffer) } != 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        Ok(u64::from(buffer.f_bavail).saturating_mul(buffer.f_frsize))
+    }
+}
+
+#[cfg(not(any(
+    windows,
+    target_os = "macos",
+    all(target_os = "linux", target_pointer_width = "64")
+)))]
 mod volume {
     use std::path::Path;
 

@@ -422,13 +422,19 @@ fn paint_struck(canvas: &mut dyn Canvas, p: PointF) {
     );
 }
 
-/// A mark's label: the overlay's 10 px, DemiBold. At the regular weight a digit's one-pixel stem
-/// fell across two columns at about half ink each, wherever the label began (its origin on a
-/// whole pixel changed nothing), and a refused vertex's red "1" read at 2.9:1 against its chip -
-/// under the 3:1 the overlay's colours are chosen to - where the red itself is 6.4:1.
+/// A mark's label: the overlay's 10 px, in Arial Bold - Liberation Sans Bold, embedded in the
+/// program with Arial's metrics (canvas::text's stand-in), where the machine has no Arial - so it
+/// is one weight on every machine. At the regular weight a digit's one-pixel stem fell across two
+/// columns at about half ink each, wherever the label began (its origin on a whole pixel changed
+/// nothing), and a refused vertex's red "1" read at 2.9:1 against its chip - under the 3:1 the
+/// overlay's colours are chosen to - where the red itself is 6.4:1. The UI's face at DemiBold
+/// mended it only where the machine had a heavier face of that family to give (Ubuntu's own fonts,
+/// as WSL has): the first Linux runs of the release, 2026-11-25, had none, drew the embedded Light
+/// face, and read 2.x:1 again.
 fn label_font() -> Font {
     let mut font = overlay_font(10);
-    font.weight = FontWeight::DemiBold;
+    font.families = vec![String::from("Arial")];
+    font.weight = FontWeight::Bold;
     font
 }
 

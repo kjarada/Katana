@@ -147,7 +147,10 @@ endif()
 # VERSION ...)). A variable cargo was not given is not an error to cargo: the
 # program is built without it, and no program says which repository it asks.
 # So a configure for a release reads back what the build script wrote - the
-# file `output` of its run, under <programs>/build/katana_update-<hash>/, one
+# file `output` of its run, under <programs>/build/katana_update-<hash>/ (cargo
+# before 1.100), or `run/stdout` under <programs>/build/katana_update/<hash>/ (cargo
+# 1.100's layout of its build folder, which MSYS2's Rust brought to the Windows
+# release job on 2026-11-25 and failed its packaging), one
 # `cargo:rustc-env=NAME=value` a line - and refuses programs that were not
 # built with real keys, this version and the repository named here. Every run
 # of the script is read, for a target folder may hold one per build of other
@@ -159,7 +162,9 @@ include("${CMAKE_CURRENT_LIST_DIR}/KatanaUpdateKeys.cmake")
 set(KATANA_UPDATE_REPO "" CACHE STRING
     "owner/name of the repository the programs were built to ask for the next version (KATANA_UPDATE_REPO in cargo's environment); empty: not checked")
 if(KATANA_REQUIRE_UPDATE_KEYS)
-    file(GLOB _katana_build_outputs "${KATANA_PROGRAMS}/build/katana_update-*/output")
+    file(GLOB _katana_build_outputs
+        "${KATANA_PROGRAMS}/build/katana_update-*/output"
+        "${KATANA_PROGRAMS}/build/katana_update/*/run/stdout")
     if(NOT _katana_build_outputs)
         message(FATAL_ERROR
             "No run of katana_update's build script under ${KATANA_PROGRAMS}/build: the programs there "

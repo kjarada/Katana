@@ -433,7 +433,8 @@ which repository it asks, so a renamed variable would give green jobs and
 programs that ask the default repository for ever. Two checks close that.
 The packaging configure reads back what katana_update's build script was
 given - the file `output` of its run under `<programs>/build/katana_update-*/`,
-`cargo:rustc-env=NAME=value` a line - and refuses programs not built with
+or `run/stdout` under `<programs>/build/katana_update/*/` in cargo 1.100's layout
+of its build folder, `cargo:rustc-env=NAME=value` a line - and refuses programs not built with
 real keys (`KATANA_UPDATE_KEYS_ARE_PLACEHOLDERS=0`), this version and the
 repository named ("Packaging"). And the step then finds each of its three
 settings in the packaging's `CMakeCache.txt` as the option the project
@@ -838,7 +839,10 @@ again.
 **The release configure reads what cargo was given.** With
 `KATANA_REQUIRE_UPDATE_KEYS` on, the configure reads every run of
 katana_update's build script under `<programs>/build/katana_update-*/output`
-and requires `KATANA_UPDATE_KEYS_ARE_PLACEHOLDERS=0`, `KATANA_VERSION=<the
+(cargo before 1.100) and `<programs>/build/katana_update/*/run/stdout` (1.100,
+whose build folder is laid out by package and hash: MSYS2's Rust brought it to
+the Windows job on 2026-11-25, and the first release run's packaging found no
+run of the script at all) and requires `KATANA_UPDATE_KEYS_ARE_PLACEHOLDERS=0`, `KATANA_VERSION=<the
 version>` and, when `KATANA_UPDATE_REPO` is given, that repository. Every run
 is read, because a target folder keeps one per build of other settings; on a
 developer's machine `cargo clean --release -p katana_update` clears the old
@@ -1498,7 +1502,27 @@ not exist in it, and with the plain note "Katana X.Y.Z".
 
 ## Not done
 
-* **The workflow in its Rust form has never run** (2026-11-15). It was
+* **The workflow's first run of the Rust programs** (2026-11-25, run
+  45563129072, for v0.4.0) built all five targets and published nothing. Every
+  job compiled, ARM64 and macOS included, after `tools/build_visible.sh
+  targets` had found three ARM-only compile errors beforehand
+  (`docs/building.md`, "The other targets, compiled here"). What failed, and
+  how each was mended before the next run: the Windows x86-64 packaging found
+  no run of katana_update's build script, cargo 1.100 having moved it
+  (above); both Linux jobs read a refused vertex's label at under 3:1, the
+  label's weight having been whatever the machine's fonts gave the UI's face
+  at DemiBold (`docs/drawing.md`; Arial Bold now, the same on every machine);
+  Linux ARM64's `update_tools_fake_feed` found a DELETE logged before the HEAD
+  sent first, the fake feed having numbered a request when its answer was
+  finished (numbered as it arrives now); on macOS every swap in
+  katana_update's tests refused for want of the free space, the harness
+  declaring statvfs for Linux and Windows alone (macOS's declared now, from the
+  libc crate's layout), and the non-UTF-8 path case could not make its file,
+  which macOS's file systems refuse with EILSEQ (the case says so now); and
+  Windows ARM64's control for the DLL reader looked for GCC's libstdc++-6.dll,
+  where CLANGARM64 has LLVM's libc++.dll (either now). The entry below is
+  what the run was expected to find.
+* **The workflow in its Rust form had never run** (2026-11-15). It was
   rewritten when the C++ was removed - cargo's build and tests and the
   runner's suite in place of the C++ configure, build and ctest, the
   packaging project in place of the C++ build's `package` target - and

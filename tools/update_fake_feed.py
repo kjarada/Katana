@@ -194,7 +194,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         feed: FakeFeed = self.server.feed    # type: ignore[attr-defined]
         path = urllib.parse.unquote(urllib.parse.urlsplit(self.path).path)
         record = self._record()
-        feed.begin()
+        feed.begin(record)
         try:
             self._answer(feed, record["port"], path, record)
         finally:
@@ -212,7 +212,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             # cases). The refusal is said in HTTP/1.1 always, so that the status logged is one that was sent.
             self.request_version = self.protocol_version
         record = self._record()
-        feed.begin()
+        feed.begin(record)
         try:
             self._send(record, "refused", int(code), {"Content-Type": "text/plain"}, b"")
         finally:
@@ -350,6 +350,7 @@ class FakeFeed:
         self._lock = threading.Lock()
         self._settled = threading.Condition(self._lock)
         self._answering = 0  # requests begun and not yet in the log
+        self._arrived = 0  # requests begun since the log was last cleared: the next one's n
         self._records: list[dict] = []
         self._servers: list[_Server] = []
         self._threads: list[threading.Thread] = []
@@ -471,15 +472,20 @@ class FakeFeed:
 
     # ---- the log ---------------------------------------------------------------------------------
 
-    def begin(self) -> None:
-        """A request has arrived and is being answered; log() ends it."""
+    def begin(self, record: dict) -> None:
+        """A request has arrived and is being answered; log() ends it. It is numbered here, in the
+        order the requests arrived: numbered when its answer was finished, a HEAD whose handler was
+        still closing its connection was logged after the DELETE the client sent once it had the
+        HEAD's answer (the release's first Linux ARM64 run, 2026-11-25)."""
         with self._lock:
             self._answering += 1
+            self._arrived += 1
+            record["n"] = self._arrived
 
     def log(self, record: dict) -> None:
         with self._settled:
-            record["n"] = len(self._records) + 1
             self._records.append(record)
+            self._records.sort(key=lambda kept: kept["n"])
             if self._log_path is not None:
                 with open(self._log_path, "a", encoding="utf-8", newline="\n") as sink:
                     sink.write(json.dumps(record, sort_keys=True) + "\n")
@@ -487,7 +493,7 @@ class FakeFeed:
             self._settled.notify_all()
 
     def requests(self, port: Optional[str] = None, settle_seconds: float = 10.0) -> list[dict]:
-        """A copy of the records so far, in the order the answers were finished; `port` keeps one port's.
+        """A copy of the records so far, in the order the requests arrived; `port` keeps one port's.
 
         A record is written when its answer has been sent, which is a moment AFTER the client has read
         it. So this waits (up to `settle_seconds`) for every request that has begun to be in the log: a
@@ -503,6 +509,7 @@ class FakeFeed:
         with self._settled:
             self._settled.wait_for(lambda: self._answering == 0, timeout=settle_seconds)
             self._records = []
+            self._arrived = 0
 
 
 # ---- the command line ---------------------------------------------------------------------------

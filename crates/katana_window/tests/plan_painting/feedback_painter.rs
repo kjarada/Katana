@@ -807,8 +807,10 @@ mod feedback_painter {
         // the "1"'s one-pixel stem fell across two columns at about half ink each - wherever the
         // label began - and its most inked pixel read at 2.9:1 against the chip (#9b4849 on
         // #14191d), under the 3:1 of WCAG 2.1's 1.4.11 that the overlay's colours are chosen to,
-        // where the red itself is 6.4:1. Labels are DemiBold now: 4.9:1 on the C++'s machine's
-        // font. The vertex at (5,0), pixel (150,200): the label's baseline starts at (159,191), its
+        // where the red itself is 6.4:1. Labels are Arial Bold now (the embedded Liberation Sans
+        // Bold where a machine has no Arial), one weight on every machine: the UI's face at
+        // DemiBold held 3:1 only where the machine had a heavier face of it, and the release's
+        // first Linux runs, 2026-11-25, had none. The vertex at (5,0), pixel (150,200): the label's baseline starts at (159,191), its
         // chip one pixel left of that, the text one right.
         let mut reason = mark(FeedbackRole::Target, vertex(5.0, 0.0), "1");
         reason.refused = true;

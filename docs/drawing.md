@@ -594,9 +594,13 @@ cyan as every tool's has always been; the polyline in play's vertices as
 the grips' cold squares, hollow, vertex 0 numbered - the grips are hidden
 while a tool runs - drawn FIRST, under every mark, and thinned so no two are
 nearer than 10 px (each end kept): a survey string's hundreds were a solid
-blue band over the target. Labels are DemiBold: at the regular weight a
-digit's one-pixel stem fell across two columns at about half ink, and a
-refused red "1" read at 2.9:1 against its chip (4.9:1 now). The caption is
+blue band over the target. Labels are Arial Bold - the embedded Liberation
+Sans Bold where a machine has no Arial, so one weight everywhere: at the
+regular weight a digit's one-pixel stem fell across two columns at about
+half ink, and a refused red "1" read at 2.9:1 against its chip. They were
+the UI's face at DemiBold until 2026-11-25, which held only where the
+machine had a heavier face of that family to give: the release's first
+Linux runs had none and read 2.x:1 again. The caption is
 on a dark chip, its stripe red when refused, at the first corner of the
 cursor - below right, above right, below left, above left - that is in the
 view, off the prompt band and clear of every mark, label and piece along
@@ -1051,8 +1055,10 @@ tests named below):
   what an existing `PLINE3D` line draws, on every surface at once - the
   owner's call, not a review fix's. The tool alone was made to climb for a
   while, and the window and `katana_cli` drew two polylines from one line.
-- Labels were measured in the headless (offscreen) renderer only: its
-  DemiBold "1" reads at 4.9:1. The window's own renderer was not measured.
+- Labels were measured in the headless (offscreen) renderer only, and its
+  3:1 is held by `feedback_painter::a_refused_vertexs_number_reads_at_three_to_one_against_its_chip`
+  on every machine the suite runs on. The window's own renderer was not
+  measured.
 - Colours still shift meaning in one place: a hot grip is red, the colour a
   tool's preview gives what goes, and turns green once a tool takes it; and
   Move Vertex's new place wears the Added "+" though nothing is added.

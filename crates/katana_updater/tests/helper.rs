@@ -2629,15 +2629,24 @@ mod helper_imports {
         // toolchain, or the case above would pass on a reader that cannot see it. The C++'s
         // control was its own test program, which linked libstdc++ as a DLL; a Rust test program
         // links its standard library statically and imports only Windows' DLLs, so the control
-        // is the toolchain's own libstdc++-6.dll, on PATH as the build has MSYS2 UCRT64's bin,
-        // which imports the toolchain's libgcc and winpthread.
+        // is the toolchain's own C++ runtime, on PATH as the build has the environment's bin:
+        // UCRT64's libstdc++-6.dll, which imports the toolchain's libgcc and winpthread, or, on
+        // Windows on ARM, CLANGARM64's libc++.dll - that environment has no GCC (the release
+        // workflow's Windows job) - which imports LLVM's libunwind.dll. Only libstdc++ was
+        // looked for until the first ARM64 run of the release, 2026-11-25, which had none.
         let control = std::env::var_os("PATH")
             .and_then(|path| {
-                std::env::split_paths(&path)
-                    .map(|folder| folder.join("libstdc++-6.dll"))
-                    .find(|file| file.is_file())
+                let folders: Vec<_> = std::env::split_paths(&path).collect();
+                ["libstdc++-6.dll", "libc++.dll"].iter().find_map(|runtime| {
+                    folders
+                        .iter()
+                        .map(|folder| folder.join(runtime))
+                        .find(|file| file.is_file())
+                })
             })
-            .expect("the toolchain's libstdc++-6.dll on PATH (MSYS2 UCRT64's bin, as the build has it)");
+            .expect(
+                "the toolchain's C++ runtime on PATH: libstdc++-6.dll (MSYS2 UCRT64's bin) or                  libc++.dll (CLANGARM64's), as the build has it",
+            );
         let imported = imported_libraries(&control);
         assert!(!imported.is_empty());
         let foreign = imported
@@ -2652,6 +2661,8 @@ mod helper_imports {
         assert!(!is_operating_system_library("libstdc++-6.dll"));
         assert!(!is_operating_system_library("libgcc_s_seh-1.dll"));
         assert!(!is_operating_system_library("libwinpthread-1.dll"));
+        assert!(!is_operating_system_library("libc++.dll"));
+        assert!(!is_operating_system_library("libunwind.dll"));
         assert!(!is_operating_system_library("libcrypto-3-x64.dll"));
         assert!(!is_operating_system_library("zlib1.dll"));
         assert!(
