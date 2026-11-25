@@ -32,9 +32,9 @@
 #
 # With `wsl` a phase runs in the WSL distribution; without it the same phases
 # run natively on Windows, in MSYS2 UCRT64 (docs/rust.md, "Windows, once the
-# port works"; the owner lifted the WSL-only rule on 2026-11-16). After a
-# Windows build, tools/stage_windows.sh puts the programs' DLLs and data where
-# a program started from Explorer finds them.
+# port works"; the owner lifted the WSL-only rule on 2026-11-16). Every
+# Windows build ends with tools/stage_windows.sh --beside, which puts the
+# programs' DLLs and data where a program started from Explorer finds them.
 #
 # Gone with the C++ (2026-11-15): `build` with its CMake targets, the C++
 # configure and its ninja, and the two gates `gate` and `wgate`, which ran the
@@ -308,7 +308,17 @@ cargo_steps() {
             --release --keep-going "${jobs[@]}" -- -D warnings || return
         rust_float_guard "$flags" || return
         echo "== cargo build --locked --workspace --release ${jobs[*]}"
-        RUSTFLAGS="$flags" cargo build --manifest-path "$manifest" --locked --workspace --release "${jobs[@]}"
+        RUSTFLAGS="$flags" cargo build --manifest-path "$manifest" --locked --workspace --release "${jobs[@]}" ||
+            return
+        # On Windows the programs import UCRT64's DLLs, which are on no PATH a
+        # program started from Explorer has, so a build is not done until its
+        # runtime is beside it: the owner's standing instruction, restated on
+        # 2026-11-25 after a build whose katana.exe would not start. The suite
+        # then runs the programs with the DLLs the owner's copy has.
+        if [ -z "${KATANA_LINUX_BUILD:-}" ]; then
+            echo "== bash tools/stage_windows.sh --beside"
+            bash tools/stage_windows.sh --beside
+        fi
         return
     fi
     # --no-fail-fast: a failing test binary must not hide the binaries after

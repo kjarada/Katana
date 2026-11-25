@@ -33,7 +33,7 @@ root, is `docs/rust.md`, "WSL, where the port is built".
 |---|---|---|---|---|
 | WSL, Linux | the prefix's (1.98.1 at the snapshot) | the prefix's GCC 16.2, glibc 2.28 sysroot | the prefix's | the prefix's |
 | macOS (Apple silicon) | the prefix's | the prefix's clang 23 and libc++ | the prefix's | the prefix's |
-| Windows x86-64 | MSYS2 UCRT64's `rust` (1.99.0) | UCRT64's GCC | UCRT64's | UCRT64's |
+| Windows x86-64 | MSYS2 UCRT64's `rust` (1.99.1) | UCRT64's GCC | UCRT64's | UCRT64's |
 | Windows ARM64 | MSYS2 CLANGARM64's `rust` | CLANGARM64's clang | CLANGARM64's | CLANGARM64's |
 
 Three files in the crates are C++, and the build compiles them: the shims of
@@ -282,12 +282,14 @@ pacman -S --needed mingw-w64-ucrt-x86_64-nsis      # only to make the installer
 
 GCC is there for the three shims, which must be compiled by the compiler
 GDAL and PDAL were built with; the linker cargo uses is the same GCC. Python
-is for the checks only. The Rust on the owner's machine is pinned at
-1.99.0-1, because the newer build of that version needs an `llvm-libs` that
-the rest of the toolchain was not built against (`docs/rust.md`, "Windows,
-once the port works"): `--needed` leaves an installed package as it is, but
-upgrading `rust` alone would move it past that toolchain, so update MSYS2
-whole (`pacman -Syu`) or not at all.
+is for the checks only. Install `rust` from the same package list as the
+rest, never after a lone `pacman -Sy`: a newer build of it can need an
+`llvm-libs` that the rest of the toolchain was not built against
+(`docs/rust.md`, "Windows, once the port works"). `--needed` leaves an
+installed package as it is, but upgrading `rust` alone would move it past
+that toolchain, so update MSYS2 whole (`pacman -Syu`) or not at all. The
+owner's machine has 1.99.1-1, installed on 2026-11-25 from the package list
+of 2026-10-24 that the rest came from.
 
 **The build.** `bash tools/build_visible.sh` from Git Bash (or any bash),
 with no `wsl`: it puts `/c/msys64/ucrt64/bin` first on `PATH` itself. By
@@ -316,7 +318,26 @@ with `objdump`, `share/gdal` and `share/proj`, and
 own output instead (the DLLs into `target/release`, the data one folder up),
 so that `target/release/katana.exe` itself starts from Explorer. It copies
 only, and refreshes a stage made before; it is a developer's copy, not a
-package ("Bundling").
+package ("Bundling"). `tools/build_visible.sh` runs `--beside` at the end of
+every Windows build, so both copies follow each build without a second step:
+a build whose program cannot be opened is not a build the owner can test
+(the owner's instruction, restated on 2026-11-25), and the runner's suite
+then runs the programs with the very DLLs the owner's copy has.
+
+**A program that will not start with 0xC0000139** ("entry point not found")
+has found every DLL by name, but one of them lacks a function another
+imports: two UCRT64 packages that were not built against each other. On
+2026-11-25 that was `mingw-w64-ucrt-x86_64-hdf5` 2.2.0-4, built without the
+ROS3 driver, under `netcdf` 4.10.1-2, which imports `H5Pset_fapl_ros3` and
+was built against 2.2.0-2; GDAL loads NetCDF, so every program failed to
+start and 609 of the runner's 825 tests failed. Putting HDF5 2.2.0-2 back
+from pacman's cache (`pacman -U
+/var/cache/pacman/pkg/mingw-w64-ucrt-x86_64-hdf5-2.2.0-2-any.pkg.tar.zst`)
+mended it; GDAL 3.13.3-3 was built before 2.2.0-4 existed, so it matches the
+older HDF5 too. A whole `pacman -Syu` brings 2.2.0-4 back, and should mend it
+only once MSYS2 has rebuilt NetCDF against it. To find such a pair, list each
+staged file's imports and each DLL's exports with `objdump -p` and look for
+an imported name that the DLL does not export.
 
 The Windows-only code - the updater's swap and its registry, the Credential
 Manager, the wide-path file operations - is compiled only here, and tested

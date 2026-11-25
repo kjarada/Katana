@@ -2079,6 +2079,15 @@ The package came from an MSYS2 mirror (`repo.msys2.org` reset the
 connection); its signature, by an MSYS2 development key, was checked against
 pacman's keyring with gpg before it was installed with `pacman -U`.
 
+On 2026-11-25 the owner's MSYS2 had no `rust` package at all (a Windows build
+found rustup's MSVC cargo instead, whose `cl.exe` cannot compile the GDAL
+shim), and its `llvm-libs` was by then 23.1.3 - so 1.99.1-1, from the same
+package list of 2026-10-24 that the rest came from, was installed with
+`pacman -S --needed`, which is not a partial upgrade. A stale `db.lck` from a
+`pacman -Syyu` interrupted on 2026-10-25, with no pacman running, was removed
+first. The same day's HDF5 and NetCDF mismatch, and how it was mended, is in
+`docs/building.md`, "Windows".
+
 It targets `x86_64-pc-windows-gnu` against UCRT: a program it builds imports
 only `api-ms-win-crt-*` and system DLLs, never msvcrt. Its cargo is the first
 on `PATH` in a build window, because `/c/msys64/ucrt64/bin` is.
