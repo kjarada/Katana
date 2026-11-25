@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.24)
 
 # The version is written here and nowhere else: crates/katana_update/build.rs reads it from
 # this line into every program, and the update tests hold the programs to it.
-project(Katana VERSION 0.3.0 LANGUAGES NONE)
+project(Katana VERSION 0.4.0 LANGUAGES NONE)
 
 # CMake builds nothing. Katana is built by cargo (the root Cargo.toml, docs/rust.md); CMake is the TEST RUNNER
 # of the programs cargo built: it registers every process-level test - the `cli.` lines through

@@ -203,6 +203,8 @@ unsafe extern "C" {
         default: *const c_char,
     ) -> *const c_char;
     pub(crate) fn CPLSetThreadLocalConfigOption(key: *const c_char, value: *const c_char);
+    // DGN: where GDAL finds its seed designs (katana_gis::gdal_data_file).
+    pub(crate) fn CPLFindFile(class: *const c_char, basename: *const c_char) -> *const c_char;
 
     // ---- cpl_string.h -------------------------------------------------------------
     pub(crate) fn CPLTestBool(value: *const c_char) -> bool;
@@ -438,6 +440,22 @@ pub(crate) fn thread_local_config_option(key: &CStr) -> Option<CString> {
     // SAFETY: NULL or this thread's value, a NUL-terminated string GDAL
     // keeps, copied before anything can replace it.
     (!value.is_null()).then(|| CString::from(unsafe { CStr::from_ptr(value) }))
+}
+
+/// `CPLFindFile(class, name)`: where GDAL finds one of its own files - in
+/// GDAL_DATA, then the folder compiled into it (port/cpl_findfile.cpp) - as
+/// GDAL's bytes; None when it finds none. GDAL's DGN writer finds its seed
+/// designs so (ogrdgndatasource.cpp, `CPLFindFile("gdal", "seed_2d.dgn")`).
+pub(crate) fn find_file(class: &CStr, name: &CStr) -> Option<Vec<u8>> {
+    // SAFETY: a NUL-terminated class and name; the answer is NULL or a string
+    // in GDAL's per-thread buffers (CPLSPrintf), copied below before anything
+    // on this thread can reuse it.
+    let found = unsafe { CPLFindFile(class.as_ptr(), name.as_ptr()) };
+    if found.is_null() {
+        return None;
+    }
+    // SAFETY: not NULL, and NUL-terminated by GDAL.
+    Some(unsafe { CStr::from_ptr(found) }.to_bytes().to_vec())
 }
 
 /// `CPLSetThreadLocalConfigOption(key, value)`; None unsets it.

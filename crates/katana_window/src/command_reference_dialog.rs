@@ -218,10 +218,13 @@ Script    SCRIPT <file.kcs> [CONTINUE]   run a katana_cli script a line at a tim
           with # is a note and runs nothing; several lines pasted run as a script, but
           pasted at a prompt for text (Text, Multiline Text) they are its lines
 Import    IMPORT <file> [LOCAL | ALONGSIDE | OFFSET=dE,dN]   a drawing, vector data, a
-          raster or a point cloud, by its extension; vector data, a .12da archive or a DXF
-          moves as one piece: LOCAL puts its lower-left corner at 0,0, ALONGSIDE on the
-          drawing's, OFFSET by dE east and dN north (GIS > Import Vector Data, Placement)
-Export    EXPORT <file>   the drawing, by extension (DXF, GeoPackage, GeoJSON, SHP, .12da)
+          raster or a point cloud, by its extension; vector data, a .12da archive, a DXF, a
+          DWG or a DGN (V7) moves as one piece: LOCAL puts its lower-left corner at 0,0,
+          ALONGSIDE on the drawing's, OFFSET by dE east and dN north (GIS > Import Vector
+          Data, Placement)
+Export    EXPORT <file>   the drawing, by extension (DXF, DWG, DGN V7 [seed=<file>],
+          GeoPackage, GeoJSON, SHP, .12da); a DWG's release with release=R2000 to R2018,
+          R2018 by default
 Info      INFO <file>   describe a data file through GDAL or PDAL (INFO id: an entity)
 IFC       IMPORT <file.ifc> [LOCAL] [NOALIGNMENTS] [NOELEMENTS] [NOSURFACES]
           [TOLERANCE <m>] [TAKECRS | KEEPCRS] | EXPORT <file.ifc> [UTILITIES <schedule.csv>]

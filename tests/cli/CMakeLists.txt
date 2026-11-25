@@ -1422,6 +1422,92 @@ if(KATANA_TEST_CLI)
         "exported file=\"[^\"]*/cli round trip\\.dxf\" kind=dxf driver=DXF format=\"DXF R2000\" entities=3 skipped=0 layers=3 .*imported file=\"[^\"]*/cli round trip\\.dxf\" kind=dxf format=\"DXF R2000\" entities=3 layers=3 .*Polyline  layer=Survey/Kerb  vertices=4  closed  length=100  area=600.*Circle  layer=Survey/Kerb  centre 15,10  radius=5 .*Text  layer=Survey/Kerb  \"LOT 42\"")
 endif()
 
+# DGN (docs/dgn.md): a MicroStation V7 design through the command line both
+# ways, natively. The drawing is the DXF round trip's above - a 30 x 20
+# rectangle (perimeter 100, area 600), a circle of radius 5 at (15,10) and a
+# text on Survey/Kerb, in red - written on GDAL's 2D seed design in metres at
+# 10 000 units of resolution a metre (the finest step whose design plane holds
+# it), its one layer on level 1, and read back on the layer "level 1": a V7
+# design numbers its levels and names none, and the export's level record
+# says which layer level 1 held. The file written is then the seed of a
+# second file, whose working units are the seed's, kept. A DXF named .dgn is
+# refused by name, with what to do.
+if(KATANA_TEST_CLI)
+    set(_dgn "${CMAKE_CURRENT_BINARY_DIR}/cli round trip.dgn")
+    set(_dgn_again "${CMAKE_CURRENT_BINARY_DIR}/cli round trip on its own seed.dgn")
+    add_test(NAME cli.a_drawing_exported_to_dgn_and_imported_back_keeps_its_curves_text_and_colour
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "LAYER NEW Survey/Kerb #FF0000"
+                -c "LAYER SET Survey/Kerb" -c "RECT 0,0 30,20" -c "CIRCLE 15,10 5"
+                -c "TEXT 5,5 2.5 \"LOT 42\"" -c "EXPORT \"${_dgn}\""
+                -c "EXPORT \"${_dgn_again}\" seed=\"${_dgn}\"" -c "NEW"
+                -c "IMPORT \"${_dgn_again}\"" -c "LIST")
+    set_tests_properties(cli.a_drawing_exported_to_dgn_and_imported_back_keeps_its_curves_text_and_colour
+        PROPERTIES PASS_REGULAR_EXPRESSION
+        "exported file=\"[^\"]*/cli round trip\\.dgn\" kind=dgn driver=DGN format=\"DGN V7 2D\" entities=3 skipped=0 elements=[0-9]+ levels=1 units=m uor_per_master=10000 bytes=[0-9]+[\r\n]+level number=1 layer=Survey/Kerb.*exported file=\"[^\"]*/cli round trip on its own seed\\.dgn\" kind=dgn driver=DGN format=\"DGN V7 2D\" entities=3 skipped=0 elements=[0-9]+ levels=1 units=m uor_per_master=10000 .*imported file=\"[^\"]*/cli round trip on its own seed\\.dgn\" kind=dgn format=\"DGN V7 2D\" entities=3 layers=1 units=m uor_per_master=10000 .*Polyline  layer=level 1  vertices=4  closed  length=100  area=600.*Circle  layer=level 1  centre 15,10  radius=5 .*Text  layer=level 1  \"LOT 42\"")
+    set(_dxf_named_dgn "${CMAKE_CURRENT_BINARY_DIR}/cli a dxf named.dgn")
+    file(WRITE "${_dxf_named_dgn}" "  0\nSECTION\n  2\nENTITIES\n  0\nENDSEC\n  0\nEOF\n")
+    add_test(NAME cli.a_dxf_named_dgn_is_refused_by_name_with_what_to_do
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "IMPORT \"${_dxf_named_dgn}\"")
+    set_tests_properties(cli.a_dxf_named_dgn_is_refused_by_name_with_what_to_do
+        PROPERTIES PASS_REGULAR_EXPRESSION
+        "this is a DXF file named \\.dgn: rename it \\.dxf and import it as DXF")
+endif()
+
+# DWG (docs/dwg.md): the DXF test's drawing through the command line both ways as a .dwg,
+# natively - no GDAL. A 30 x 20 rectangle (perimeter 100, area 600), a circle of radius 5 at
+# (15,10) and a text on a nested layer; exported in the default release, R2018, a new drawing,
+# imported back. The DWG goes through the DXF writer and reader (katana_dwg), so the records are
+# the DXF test's with kind=dwg and the DWG's release: three layers out (0, Survey, Survey/Kerb)
+# and the same three entities back.
+if(KATANA_TEST_CLI)
+    set(_dwg "${CMAKE_CURRENT_BINARY_DIR}/cli round trip.dwg")
+    add_test(NAME cli.a_drawing_exported_to_dwg_and_imported_back_keeps_its_curves_text_and_layer
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "LAYER NEW Survey/Kerb #FF0000"
+                -c "LAYER SET Survey/Kerb" -c "RECT 0,0 30,20" -c "CIRCLE 15,10 5"
+                -c "TEXT 5,5 2.5 \"LOT 42\"" -c "EXPORT \"${_dwg}\"" -c "NEW"
+                -c "IMPORT \"${_dwg}\"" -c "LIST")
+    set_tests_properties(cli.a_drawing_exported_to_dwg_and_imported_back_keeps_its_curves_text_and_layer
+        PROPERTIES PASS_REGULAR_EXPRESSION
+        "exported file=\"[^\"]*/cli round trip\\.dwg\" kind=dwg driver=DWG format=\"DWG R2018\" entities=3 skipped=0 layers=3 .*imported file=\"[^\"]*/cli round trip\\.dwg\" kind=dwg format=\"DWG R2018\" entities=3 layers=3 .*Polyline  layer=Survey/Kerb  vertices=4  closed  length=100  area=600.*Circle  layer=Survey/Kerb  centre 15,10  radius=5 .*Text  layer=Survey/Kerb  \"LOT 42\"")
+    # release= picks the release; the oldest written, R2000 (AC1015), says so both ways.
+    set(_dwg2000 "${CMAKE_CURRENT_BINARY_DIR}/cli round trip r2000.dwg")
+    add_test(NAME cli.a_drawing_exported_as_an_r2000_dwg_says_its_release_out_and_back
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "RECT 0,0 30,20"
+                -c "EXPORT \"${_dwg2000}\" release=R2000" -c "NEW" -c "IMPORT \"${_dwg2000}\"")
+    set_tests_properties(cli.a_drawing_exported_as_an_r2000_dwg_says_its_release_out_and_back
+        PROPERTIES PASS_REGULAR_EXPRESSION
+        "exported file=\"[^\"]*/cli round trip r2000\\.dwg\" kind=dwg driver=DWG format=\"DWG R2000\" entities=1 .*imported file=\"[^\"]*/cli round trip r2000\\.dwg\" kind=dwg format=\"DWG R2000\" entities=1 ")
+    # Refused by name: a release Katana reads and does not write, and a file that is not a DWG -
+    # a DXF under the DWG's extension, and an empty file - each with what it is.
+    add_test(NAME cli.a_dwg_export_refuses_a_release_it_does_not_write_by_name
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "RECT 0,0 30,20"
+                -c "EXPORT \"${CMAKE_CURRENT_BINARY_DIR}/cli old release.dwg\" release=R14")
+    set_tests_properties(cli.a_dwg_export_refuses_a_release_it_does_not_write_by_name
+        PROPERTIES PASS_REGULAR_EXPRESSION
+        "error: Unsupported: R14 DWG \\(AC1014\\) is not written")
+    set(_dxf_as_dwg "${CMAKE_CURRENT_BINARY_DIR}/cli a dxf named.dwg")
+    file(WRITE "${_dxf_as_dwg}" "  0\nSECTION\n  2\nENTITIES\n  0\nENDSEC\n  0\nEOF\n")
+    add_test(NAME cli.a_dxf_under_the_dwg_extension_is_refused_as_a_dxf
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "IMPORT \"${_dxf_as_dwg}\"")
+    set_tests_properties(cli.a_dxf_under_the_dwg_extension_is_refused_as_a_dxf
+        PROPERTIES PASS_REGULAR_EXPRESSION
+        "error: ParseFailure: not a DWG file: it is a DXF \\(text\\); give it the \\.dxf extension")
+    set(_empty_dwg "${CMAKE_CURRENT_BINARY_DIR}/cli empty.dwg")
+    file(WRITE "${_empty_dwg}" "")
+    add_test(NAME cli.an_empty_dwg_is_refused_as_not_a_dwg
+        COMMAND ${CMAKE_COMMAND} -E env "PATH=${KATANA_RUNTIME_BIN};$ENV{PATH}"
+                ${KATANA_PROGRAM_katana_cli} -c "IMPORT \"${_empty_dwg}\"")
+    set_tests_properties(cli.an_empty_dwg_is_refused_as_not_a_dwg
+        PROPERTIES PASS_REGULAR_EXPRESSION
+        "error: ParseFailure: not a DWG file: it is empty \\(0 bytes\\)")
+endif()
+
 # INFO, COPC and IMPORT ... LOCAL, on the sample GIS data. Expected values are
 # the files' own: terrain.asc's header says 120 x 90 cells of 1.5 from a
 # lower-left corner at (-5, -5), so it spans to (175, 130); `pdal info`

@@ -4130,4 +4130,54 @@ mod mcp_server {
             "symbol scale must be above 0",
         );
     }
+
+    // DWG (docs/dwg.md): katana_export's release is the word EXPORT takes, the reply's
+    // records are numbers and words an agent reads, and katana_import reads the file back. A
+    // 30 x 20 rectangle and a circle, drawn by hand: two entities on layer 0.
+    #[test]
+    fn an_agent_writes_a_dwg_of_the_release_it_asks_for_and_reads_it_back() {
+        let mut client = Client::new();
+        client.initialize();
+        let drawn = client.run_lines(&["RECT 0,0 30,20", "CIRCLE 15,10 5"]);
+        assert!(!is_error(&drawn), "{}", text_of(&drawn));
+        let dir = temp("dwg release");
+        let out = dir.file("site.dwg");
+        let written = client.call(
+            "katana_export",
+            object([
+                ("path", Json::from(&out)),
+                ("release", Json::from("R2013")),
+            ]),
+        );
+        assert!(!is_error(&written), "{}", text_of(&written));
+        assert_eq!(
+            written["structuredContent"]["commands"][0]["command"],
+            Json::from(format!("EXPORT \"{out}\" release=R2013"))
+        );
+        let exported = &written["structuredContent"]["records"][0];
+        assert_eq!(exported["record"], Json::from("exported"));
+        assert_eq!(exported["kind"], Json::from("dwg"));
+        assert_eq!(exported["format"], Json::from("DWG R2013"));
+        assert_eq!(exported["entities"], Json::from(2));
+
+        let mut reader = Client::new();
+        reader.initialize();
+        let read = reader.call("katana_import", object([("path", Json::from(&out))]));
+        assert!(!is_error(&read), "{}", text_of(&read));
+        let imported = &read["structuredContent"]["records"][0];
+        assert_eq!(imported["record"], Json::from("imported"));
+        assert_eq!(imported["kind"], Json::from("dwg"));
+        assert_eq!(imported["format"], Json::from("DWG R2013"));
+        assert_eq!(imported["entities"], Json::from(2));
+
+        let refused = client.call(
+            "katana_export",
+            object([
+                ("path", Json::from(dir.file("old.dwg"))),
+                ("release", Json::from("R14")),
+            ]),
+        );
+        assert!(is_error(&refused));
+        holds(&text_of(&refused), "R14 DWG (AC1014) is not written");
+    }
 }

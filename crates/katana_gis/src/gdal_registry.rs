@@ -17,7 +17,7 @@
 //! other option the crate sets is thread-local and put back.
 
 use std::ffi::CStr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Once;
 
 use katana_core::library_data::data_beside_library;
@@ -38,6 +38,19 @@ pub(crate) fn ensure_registered() {
         // Result with CPLGetLastErrorMsg() as context instead.
         error::install_quiet_global_handler();
     });
+}
+
+/// GDAL's own support file `name`, where GDAL's drivers find it: in
+/// GDAL_DATA (which ensure_registered points at the data beside the library
+/// when nothing else has), else in the folder compiled into GDAL
+/// (CPLFindFile, class "gdal"); None when GDAL has no such file. The DGN
+/// export's default seed designs are found so (docs/dgn.md), where GDAL's
+/// own DGN writer finds them.
+pub fn gdal_data_file(name: &str) -> Option<PathBuf> {
+    ensure_registered();
+    let found = cpl::find_file(c"gdal", &cpl::c_string(name))?;
+    let path = katana_core::path_text::path_from_utf8(found);
+    path.is_file().then_some(path)
 }
 
 /// Whether GDAL's configuration has `key`, from the environment or set.

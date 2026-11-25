@@ -3626,6 +3626,25 @@ if(KATANA_TEST_WINDOW)
     endif()
 endif()
 
+# DGN (docs/dgn.md): a .dgn through the window both ways goes to the native
+# module, as a .dxf does: a 30 x 20 rectangle drawn, written as a V7 design
+# on GDAL's 2D seed and read back, each reported in the records the command
+# line writes.
+if(KATANA_TEST_WINDOW)
+    add_test(NAME qt_dgn_export_and_import_go_through_the_native_module_headless
+        COMMAND ${CMAKE_COMMAND}
+            "-DAPP=${KATANA_PROGRAM_katana}"
+            "-DPROJECT=${CMAKE_CURRENT_BINARY_DIR}/no_project_dgn"
+            "-DDRIVE=>RECT 0,0 30,20|>EXPORT ${CMAKE_CURRENT_BINARY_DIR}/qt_dgn_export.dgn|>IMPORT ${CMAKE_CURRENT_BINARY_DIR}/qt_dgn_export.dgn"
+            "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/qt_dgn_headless.png"
+            "-DEXPECT=exported file=\"?[^ ]*/qt_dgn_export\\.dgn\"? kind=dgn driver=DGN format=\"DGN V7 2D\" entities=1 skipped=0 .*imported file=\"?[^ ]*/qt_dgn_export\\.dgn\"? kind=dgn format=\"DGN V7 2D\" entities=1 layers=1 "
+            -P "${PROJECT_SOURCE_DIR}/tools/check_screenshot.cmake")
+    set_tests_properties(qt_dgn_export_and_import_go_through_the_native_module_headless PROPERTIES
+        ENVIRONMENT_MODIFICATION
+            "PATH=path_list_prepend:${KATANA_RUNTIME_BIN};QT_QPA_PLATFORM=set:offscreen"
+        TIMEOUT 180)
+endif()
+
 # The session verbs on the window's command line and the window's one
 # executor (docs/desktop.md, "One executor: the command runner"). Typed with
 # --command as an agent types them: INFO with an entity's id, CODE CENSUS,

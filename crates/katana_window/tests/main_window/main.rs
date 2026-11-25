@@ -31,6 +31,7 @@
 pub mod window_support;
 
 mod command_line;
+mod dwg_routing; // DWG (docs/dwg.md)
 mod geo_menus;
 mod imported_meshes;
 mod keyboard_shortcuts;

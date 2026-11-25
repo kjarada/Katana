@@ -81,6 +81,29 @@ mod vector_export_line {
         assert!(export_is_native("C:/out/site.12da"));
         assert!(!export_is_native("C:/out/site.gpkg"));
     }
+
+    // DWG (docs/dwg.md).
+    #[test]
+    fn a_dwg_takes_the_scope_and_its_release_and_the_default_release_is_left_out() {
+        let mut form = drawing_form("C:/out/site.dwg");
+        form.layer_name = String::from("parcels");
+        assert!(export_is_native("C:/out/site.DWG"));
+        assert_eq!(line_of(&form), "EXPORT \"C:/out/site.dwg\" DRAWING");
+        form.dwg_release = String::from("R2018");
+        assert_eq!(line_of(&form), "EXPORT \"C:/out/site.dwg\" DRAWING");
+        form.dwg_release = String::from("R2010");
+        assert_eq!(
+            line_of(&form),
+            "EXPORT \"C:/out/site.dwg\" DRAWING release=R2010"
+        );
+        // A release Katana does not write has no line.
+        form.dwg_release = String::from("R14");
+        assert!(vector_export_line(&form).is_err());
+        // A release is a DWG's alone: for another file it is not said.
+        let mut other = drawing_form("C:/out/site.dxf");
+        other.dwg_release = String::from("R2010");
+        assert_eq!(line_of(&other), "EXPORT \"C:/out/site.dxf\" DRAWING");
+    }
 }
 
 mod vector_export_dialog {
@@ -160,6 +183,90 @@ mod vector_export_dialog {
         assert_eq!(
             bench.text("vectorExportCommand"),
             "EXPORT \"C:/out/site.gpkg\" DRAWING split=layer"
+        );
+    }
+
+    // DWG (docs/dwg.md).
+    #[test]
+    fn a_dwg_offers_its_release_and_run_hands_over_the_line_it_makes() {
+        let host = RecordingHost::new().answering(Answer::Custom(Box::new(
+            |_parts: &mut HostParts, _line: &str| {
+                VerbOutcome::new(
+                    true,
+                    "exported file=\"C:/out/site.dwg\" kind=dwg driver=DWG format=\"DWG R2004\" \
+                     entities=4 skipped=0 layers=4 bytes=31744",
+                    "",
+                )
+            },
+        )));
+        let mut dialog = VectorExportDialog::new(runner_context(), &host);
+        dialog.set_file("C:/out/site.gpkg");
+        dialog.show(&host);
+        let mut bench = Bench::new("vectorExportDialog", dialog, host);
+        // Off for a file that is not a DWG.
+        assert!(!bench.enabled("vectorExportDwgRelease"));
+        bench.dialog.set_file("C:/out/site.dwg");
+        bench.draw();
+        assert!(bench.enabled("vectorExportDwgRelease"));
+        // A DWG takes no GDAL option.
+        assert!(!bench.enabled("vectorExportCrs"));
+        // R2018 first, the verb's default, which the line leaves out.
+        assert_eq!(
+            bench.text("vectorExportCommand"),
+            "EXPORT \"C:/out/site.dwg\" DRAWING"
+        );
+        bench.fill("vectorExportDwgRelease", "R2004");
+        let expected = "EXPORT \"C:/out/site.dwg\" DRAWING release=R2004";
+        assert_eq!(bench.text("vectorExportCommand"), expected);
+        bench.press("vectorExportRun");
+        let ran = bench.host.lines();
+        assert_eq!(ran, vec![String::from(expected)]);
+        assert_eq!(
+            bench.dialog.status_text(),
+            "Wrote 4 features to C:/out/site.dwg."
+        );
+    }
+}
+
+// DGN (docs/dgn.md): a .dgn is written natively, so it takes the scope and the seed design it is
+// written on, and none of GDAL's options.
+mod dgn_export {
+    use super::*;
+
+    #[test]
+    fn a_dgn_takes_the_scope_and_its_seed_alone() {
+        let mut form = drawing_form("C:/out/site.dgn");
+        form.layer_name = String::from("parcels");
+        form.text_as_points = true;
+        assert!(export_is_native("C:/out/SITE.DGN"));
+        assert_eq!(line_of(&form), "EXPORT \"C:/out/site.dgn\" DRAWING");
+        form.seed = String::from("C:/seeds/metric 3d.dgn");
+        assert_eq!(
+            line_of(&form),
+            "EXPORT \"C:/out/site.dgn\" DRAWING seed=\"C:/seeds/metric 3d.dgn\""
+        );
+        // A seed is a DGN's: another format's line does not carry it.
+        let mut form = drawing_form("C:/out/site.dxf");
+        form.seed = String::from("C:/seeds/metric.dgn");
+        assert_eq!(line_of(&form), "EXPORT \"C:/out/site.dxf\" DRAWING");
+    }
+
+    #[test]
+    fn the_seed_field_is_on_for_a_dgn_alone_and_the_line_names_the_seed() {
+        let host = RecordingHost::new();
+        let mut dialog = VectorExportDialog::new(GisDialogContext::default(), &host);
+        dialog.set_file("C:/out/site.gpkg");
+        dialog.show(&host);
+        let mut bench = Bench::new("vectorExportDialog", dialog, host);
+        assert!(!bench.enabled("vectorExportSeed"));
+        bench.dialog.set_file("C:/out/site.dgn");
+        bench.draw();
+        assert!(bench.enabled("vectorExportSeed"));
+        assert!(!bench.enabled("vectorExportCrs"));
+        bench.fill("vectorExportSeed", "C:/seeds/metric.dgn");
+        assert_eq!(
+            bench.text("vectorExportCommand"),
+            "EXPORT \"C:/out/site.dgn\" DRAWING seed=C:/seeds/metric.dgn"
         );
     }
 }

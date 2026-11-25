@@ -33,6 +33,34 @@ fn from_windows1252(bytes: &[u8]) -> String {
     text
 }
 
+/// `text` in Windows-1252, the code page a MicroStation V7 design's text is
+/// written in (docs/dgn.md): each character the code page has as its byte,
+/// over the decoder's own table so that the two agree about every byte, and
+/// each other character as '?', counted.
+pub fn encode_windows1252(text: &str) -> (Vec<u8>, usize) {
+    let mut bytes = Vec::with_capacity(text.len());
+    let mut unmapped = 0;
+    for character in text.chars() {
+        let point = u32::from(character);
+        let byte = if point < 0x80 || (0xa0..0x100).contains(&point) {
+            Some(point as u8)
+        } else {
+            WINDOWS_1252_HIGH
+                .iter()
+                .position(|&mapped| u32::from(mapped) == point)
+                .map(|at| 0x80 + at as u8)
+        };
+        match byte {
+            Some(byte) => bytes.push(byte),
+            None => {
+                bytes.push(b'?');
+                unmapped += 1;
+            }
+        }
+    }
+    (bytes, unmapped)
+}
+
 pub fn utf8_or_windows1252(text: impl AsRef<[u8]>) -> String {
     let bytes = text.as_ref();
     match validated_utf8(bytes) {

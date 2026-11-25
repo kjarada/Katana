@@ -4,7 +4,8 @@
 //! docs/rust.md). DXF read and write, natively: entities, layers and
 //! linetypes, with no third-party library. It may see core, math, geometry,
 //! entity and commands; commands only for import_command, the import as the
-//! one undoable step both front ends execute.
+//! one undoable step both front ends execute - and, as import_parts, the DGN
+//! import's step too (docs/dgn.md), so that a drawing import is built one way.
 
 #![allow(
     clippy::neg_cmp_op_on_partial_ord,
@@ -22,7 +23,7 @@ pub use codes::{
     exact_degrees, indexed_colour, nearest_indexed_colour, nearest_lineweight, plain_mtext,
     plain_text, true_colour,
 };
-pub use import_command::import_command;
+pub use import_command::{import_command, import_parts};
 pub use reader::{
     APPLICATION_NAME, DxfImport, EXTENDED_COLOUR, EXTENDED_HEIGHTS, EXTENDED_PATH, EntityTally,
     ImportOptions, META_BLOCK, META_LINETYPE, META_LINEWEIGHT, META_SOURCE, is_dxf_path, read_dxf,

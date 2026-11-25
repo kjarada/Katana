@@ -501,7 +501,7 @@ test enforces this on the crates' `Cargo.toml` files.
 
 ```
 core -> math -> geometry -> {terrain, render, entity} -> commands -> storage -> cad -> app -> window
-        geodesy, survey (on core + math)          archive12d, dxf (beside commands, no GDAL)
+        geodesy, survey (on core + math)          archive12d, dxf, dwg, dgn (beside commands, no GDAL)
         surveyio (survey + geometry; seen only by app and window)
         gis, pointcloud (GDAL/PDAL) -> interop (seen by app and window)
         gpu (katana_gpu, with render's rule: never a Document)

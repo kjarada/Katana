@@ -1,0 +1,24 @@
+[package]
+name = "katana_dwg"
+description = "The dwg layer: DWG read and written through acadrust."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+acadrust.workspace = true
+katana_core.workspace = true
+katana_dxf.workspace = true
+katana_entity.workspace = true
+
+# The tests build drawings with known geometry and undo the import; the library names none of
+# these (cargo 1.100's unused_dependencies).
+[dev-dependencies]
+katana_commands.workspace = true
+katana_geometry.workspace = true
+katana_math.workspace = true
+
+[lints]
+workspace = true

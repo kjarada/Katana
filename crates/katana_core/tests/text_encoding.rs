@@ -196,4 +196,26 @@ mod text_encoding {
         let every_byte: Vec<u8> = (0..=255).collect();
         assert!(is_valid_utf8(utf8_or_windows1252(&every_byte)));
     }
+
+    // The DGN writer's encoder (docs/dgn.md): the decoder's inverse, byte for
+    // byte, and what the code page has no byte for is a counted '?'.
+    #[test]
+    fn windows1252_encoding_gives_back_every_byte_its_decoding_read() {
+        let every_byte: Vec<u8> = (0..=255).collect();
+        let decoded = decode_text_as(&every_byte, TextEncoding::Windows1252).unwrap();
+        let (encoded, unmapped) = encode_windows1252(&decoded.text);
+        assert_eq!(encoded, every_byte);
+        assert_eq!(unmapped, 0);
+        // The Unicode Consortium's CP1252.TXT: 0x80 is the euro sign, 0x96 the
+        // en dash; Latin-1's own e acute and degree sign are their code points.
+        assert_eq!(
+            encode_windows1252("\u{20AC}5 \u{2013} Caf\u{E9} 90\u{B0}"),
+            (b"\x805 \x96 Caf\xe9 90\xb0".to_vec(), 0)
+        );
+        assert_eq!(
+            encode_windows1252("A\u{4E2D}B\u{1F600}"),
+            (b"A?B?".to_vec(), 2)
+        );
+        assert_eq!(encode_windows1252(""), (Vec::new(), 0));
+    }
 }

@@ -8,6 +8,12 @@
 //! executor's, which run these steps for a .dxf - as a job in the window. One
 //! DXF import and one DXF export, whichever front end asks.
 //!
+//! A .dwg goes through the same steps (dwg_verbs, docs/dwg.md): its entities
+//! come in through katana_dxf's reader and go out through its writer, so the
+//! undo step, the records and what an export draws around the writer are
+//! these functions' (apply_drawing_import, export_drawing,
+//! export_drawing_scoped), not a second copy of them.
+//!
 //! The C++'s runDxfVerb, which runs the steps back to back in a build without
 //! GDAL, has no Rust: the Rust app always has GDAL, so the executor's IMPORT
 //! and EXPORT are the only callers (step 6 plan, section 8, choice 11).
@@ -35,7 +41,8 @@ use crate::import_records::{
 // is not in the drawing, or has none of the values its template names - is
 // written as a bare arrow. The file is what it is; the export says so rather
 // than leave a callout silently blank. `only`: just those entities' leaders.
-fn blank_leaders(
+// The DGN export says the same of its file (dgn_verbs.rs).
+pub(crate) fn blank_leaders(
     model: &Model,
     drawn: &DrawnAnnotation,
     only: Option<&BTreeSet<EntityId>>,
@@ -64,20 +71,26 @@ fn blank_leaders(
     said
 }
 
-/// Reads `file` with `shift` subtracted from every plan coordinate (cad's
-/// import_placement: the file is read again with the shift, so the one reader
-/// moves every kind of geometry alike). Pure: no drawing is seen. The C++'s
-/// default `shift` is None.
-pub fn read_dxf_import(file: &Path, shift: Option<Vec2>) -> Result<DxfImport> {
-    let options = ImportOptions {
+/// The reader's options for `file`, read with `shift` subtracted from every
+/// plan coordinate: its name as every entity's source. A DWG is read with the
+/// same (dwg_verbs), since its entities come through the same reader.
+pub(crate) fn drawing_import_options(file: &Path, shift: Option<Vec2>) -> ImportOptions {
+    ImportOptions {
         source_name: file
             .file_name()
             .map(|name| path_text(Path::new(name)))
             .unwrap_or_default(),
         origin_shift: shift,
         ..ImportOptions::default()
-    };
-    read_dxf_file(file, &options)
+    }
+}
+
+/// Reads `file` with `shift` subtracted from every plan coordinate (cad's
+/// import_placement: the file is read again with the shift, so the one reader
+/// moves every kind of geometry alike). Pure: no drawing is seen. The C++'s
+/// default `shift` is None.
+pub fn read_dxf_import(file: &Path, shift: Option<Vec2>) -> Result<DxfImport> {
+    read_dxf_file(file, &drawing_import_options(file, shift))
 }
 
 /// The linetypes, layers and entities `imported` brings as ONE undo step, and
@@ -85,10 +98,27 @@ pub fn read_dxf_import(file: &Path, shift: Option<Vec2>) -> Result<DxfImport> {
 /// per entity kind, the reader's warnings.
 pub fn apply_dxf_import(
     document: &mut Document,
+    imported: DxfImport,
+    file: &Path,
+    placement: &ImportPlacement,
+    placed: &ImportShift,
+) -> Result<String> {
+    apply_drawing_import(document, imported, file, placement, placed, "dxf", "DXF")
+}
+
+/// apply_dxf_import's step and records for a drawing katana_dxf's reader read,
+/// whichever file it came from: `kind` is the imported record's kind= ("dxf",
+/// "dwg") and `format_name` the format its release follows in format= ("DXF
+/// R2000", "DWG R2018"). One step and one set of records, so a DXF and a DWG
+/// cannot come to differ in either (docs/dwg.md).
+pub(crate) fn apply_drawing_import(
+    document: &mut Document,
     mut imported: DxfImport,
     file: &Path,
     placement: &ImportPlacement,
     placed: &ImportShift,
+    kind: &str,
+    format_name: &str,
 ) -> Result<String> {
     let count = imported.entities.len();
     let layers = imported.layers.len();
@@ -102,12 +132,12 @@ pub fn apply_dxf_import(
         document.execute(command)?;
     }
     let format = if imported.release.is_empty() {
-        String::from("DXF")
+        String::from(format_name)
     } else {
-        format!("DXF {}", imported.release)
+        format!("{format_name} {}", imported.release)
     };
     let mut reply = format!(
-        "imported file={} kind=dxf format={} entities={count} layers={layers} \
+        "imported file={} kind={kind} format={} entities={count} layers={layers} \
          linetypes={linetypes} bounds={}",
         record_text(&path_text(file)),
         record_text(&format),
@@ -141,6 +171,24 @@ pub fn write_dxf_export(
     file: &Path,
     leaders: &LeaderContext,
 ) -> Result<DxfExport> {
+    let (mut written, blank) =
+        export_drawing(model, annotation_scale, leaders, |model, options| {
+            write_dxf_file(model, file, options)
+        })?;
+    written.warnings.extend(blank);
+    Ok(written)
+}
+
+/// What write_dxf_export does around the writer, for any writer of katana_dxf's
+/// ExportOptions - the DXF's, and the DWG's, which writes through it
+/// (dwg_verbs): the annotation drawn out, `write` run with it, and the leaders
+/// written without their notes said. What `write` gave back, and those.
+pub(crate) fn export_drawing<T>(
+    model: &Model,
+    annotation_scale: f64,
+    leaders: &LeaderContext,
+    write: impl FnOnce(&Model, &ExportOptions<'_>) -> Result<T>,
+) -> Result<(T, Vec<String>)> {
     // Labels and every dimension kind drawn out as the plan view draws them,
     // at the drawing's annotation scale.
     let drawn = draw_annotation_for_export(model, annotation_scale, &estimated_measure(), leaders);
@@ -149,9 +197,8 @@ pub fn write_dxf_export(
         drawn: Some(&drawn),
         ..ExportOptions::default()
     };
-    let mut written = write_dxf_file(model, file, &options)?;
-    written.warnings.extend(blank_leaders(model, &drawn, None));
-    Ok(written)
+    let written = write(model, &options)?;
+    Ok((written, blank_leaders(model, &drawn, None)))
 }
 
 /// The same for the entities `only` of `model` (an EXPORT's scope; the C++'s
@@ -168,6 +215,24 @@ pub fn write_dxf_export_scoped(
     leaders: &LeaderContext,
     only: &BTreeSet<EntityId>,
 ) -> Result<DxfExport> {
+    let (mut written, blank) =
+        export_drawing_scoped(model, annotation_scale, leaders, only, |model, options| {
+            write_dxf_file(model, file, options)
+        })?;
+    written.warnings.extend(blank);
+    Ok(written)
+}
+
+/// What write_dxf_export_scoped does around the writer, for any writer of
+/// katana_dxf's ExportOptions (see export_drawing): the annotation drawn from
+/// the whole of `model`, then `model` cut to `only` in place, then `write`.
+pub(crate) fn export_drawing_scoped<T>(
+    model: &mut Model,
+    annotation_scale: f64,
+    leaders: &LeaderContext,
+    only: &BTreeSet<EntityId>,
+    write: impl FnOnce(&Model, &ExportOptions<'_>) -> Result<T>,
+) -> Result<(T, Vec<String>)> {
     let mut drawn =
         draw_annotation_for_export(model, annotation_scale, &estimated_measure(), leaders);
     // Only then the scope: what it left out is not written, and neither is
@@ -190,9 +255,8 @@ pub fn write_dxf_export_scoped(
         drawn: Some(&drawn),
         ..ExportOptions::default()
     };
-    let mut written = write_dxf_file(model, file, &options)?;
-    written.warnings.extend(blank);
-    Ok(written)
+    let written = write(&*model, &options)?;
+    Ok((written, blank))
 }
 
 /// The records of a DXF written: exported, then the writer's warnings.

@@ -206,6 +206,7 @@ KATANA_DECLARED(CPLGetConfigOption, const char *(*)(const char *, const char *))
 KATANA_DECLARED(CPLSetConfigOption, void (*)(const char *, const char *));
 KATANA_DECLARED(CPLGetThreadLocalConfigOption, const char *(*)(const char *, const char *));
 KATANA_DECLARED(CPLSetThreadLocalConfigOption, void (*)(const char *, const char *));
+KATANA_DECLARED(CPLFindFile, const char *(*)(const char *, const char *));
 KATANA_DECLARED(CPLTestBool, bool (*)(const char *));
 KATANA_DECLARED(CPLFetchBool, bool (*)(CSLConstList, const char *, bool));
 KATANA_DECLARED(CSLDestroy, void (*)(char **));

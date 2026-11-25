@@ -28,7 +28,9 @@ katana_archive12d = { path = "crates/katana_archive12d" }
 katana_cad = { path = "crates/katana_cad" }
 katana_commands = { path = "crates/katana_commands" }
 katana_core = { path = "crates/katana_core" }
+katana_dgn = { path = "crates/katana_dgn" }
 katana_dxf = { path = "crates/katana_dxf" }
+katana_dwg = { path = "crates/katana_dwg" }
 katana_entity = { path = "crates/katana_entity" }
 katana_geodesy = { path = "crates/katana_geodesy" }
 katana_geometry = { path = "crates/katana_geometry" }
@@ -50,6 +52,10 @@ katana_update = { path = "crates/katana_update" }
 wgpu = { version = "30.0.1", default-features = false, features = ["std", "parking_lot", "wgsl", "vulkan", "dx12", "metal"] }
 # Blocks on wgpu's adapter and device requests, which are futures.
 pollster = "1.0.1"
+# DWG read and written (docs/dwg.md): pure Rust, MPL-2.0 with MIT code from ACadSharp,
+# 0.6.8 of 2026-10-27. Without its default `parallel`: its reads and writes run on the
+# calling thread, and Rayon's pool is not a second task pool beside katana_core::task_pool.
+acadrust = { version = "0.6.8", default-features = false }
 
 [workspace.lints.rust]
 # Deny, not forbid: the modules that must be unsafe - the FFI adapters, the OS

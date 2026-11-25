@@ -84,11 +84,21 @@ undo step; they are `docs/geoprocessing.md`'s "V1" onwards.
 | Point cloud | LAS, LAZ, COPC, BPF, PLY, PCD in; LAS/LAZ out, at 1 mm (audit IO-17); any of them to COPC |
 | Raster out | a surface as a DEM: GeoTIFF, Esri ASCII grid, Erdas IMG (`export_surface_raster`) |
 | 12d Archive | .12da and .12daz in and out — every element of the format; see below |
+| DGN | MicroStation V7 designs in and out, natively, as a drawing (`docs/dgn.md`); a V8 design refused by name |
 | Where | a file, a folder GDAL reads (a `.gdb`), a `/vsi` path, a URL, a `.zip`, `.tar`, `.tgz` or `.gz` by what is inside it |
 
 IFC is not here: `katana_ifc` reads and writes it natively, with no GDAL
 (`docs/ifc.md`), and every front end routes a `.ifc` to it before any of
-these. Not supported: **DWG** where GDAL has no CAD driver, and **ECW and
+these. Nor is DWG: `katana_dwg` reads and writes it through acadrust
+(`docs/dwg.md`), and every front end routes a `.dwg` to it before GDAL is
+asked - whose CAD driver, where a build has one, reads R2000 alone and as GIS
+features.
+
+DGN is not here either (since 2026-11-25): `katana_dgn` reads and writes
+MicroStation V7 designs natively, as a drawing and not as GIS features, and
+every front end routes a `.dgn` to it, as it routes a `.dxf` to `katana_dxf`,
+before GDAL's DGN driver would see it (`docs/dgn.md`, which says what that
+driver made of one). Not supported: **ECW and
 E57**. The MSYS2 toolchain has no ECW SDK, so GDAL has no ECW reader and
 `.ecw` is not offered at all now that the extensions come from GDAL's
 registry (it was offered until 2026-09-26); PDAL has no E57 plugin here, so
@@ -954,6 +964,7 @@ Records, one per line, as every geoprocessing verb replies
 ```
 imported file=<path> kind=vector entities=9 layers=1 features=9 skipped=0 bounds=x0,y0,x1,y1 crs="..."
 imported file=<path> kind=dxf format="DXF R2000" entities=9 layers=3 linetypes=2 bounds=...
+imported file=<path> kind=dwg format="DWG R2018" entities=9 layers=3 linetypes=2 bounds=...
 imported file=<path> kind=archive entities= alignments= surfaces= meshes= clouds= layers= styles= encoding= version= member= bounds=
 imported file=<path> kind=raster            (then its reference record)
 imported file=<path> kind=pointcloud        (then its reference record)
@@ -966,6 +977,7 @@ meshes count= triangles= held=yes|no
 references rasters=<n> clouds=<n>
 exported file=<path> kind=vector driver=GPKG features= skipped=
 exported file=<path> kind=dxf driver=DXF format="DXF R2000" entities= skipped= layers= bytes=
+exported file=<path> kind=dwg driver=DWG format="DWG R2018" entities= skipped= layers= bytes=
 exported file=<path> kind=archive driver=12da entities= skipped= alignments= surfaces= bytes=
 converted source=<path> file=<path> format=copc
 warning text="..."
@@ -977,6 +989,12 @@ warning text="..."
   move, which is what a person reads the sentence for.
 - **`features`** counts what the reader read, a multi-part feature once per
   part - the sample's spoil heaps, one MultiPolygon, are two.
+- **A .dgn's records** are `imported ... kind=dgn format="DGN V7 2D"
+  entities= layers= units= uor_per_master= bounds=` with a tally per element
+  kind, and `exported ... kind=dgn driver=DGN ... levels= units=
+  uor_per_master= bytes=` with a `level number= layer=` record for each level
+  written (`docs/dgn.md`, "On every surface"); their steps are
+  `crates/katana_app/src/dgn_verbs.rs`, split as the DXF's.
 - **The DXF records are the same in every build.** The DXF steps live in
   `crates/katana_app/src/dxf_verbs.rs`, split as the executor runs a line (a pure
   read or write, then the apply). One DXF import, one DXF export, one reply.
@@ -1242,7 +1260,12 @@ have, read by one parser in `crates/katana_app/src/geo/export_verb.rs`:
 EXPORT <file> [<scope>] [layername=<n> | split=layer] [append]
        [crs=project|native|<code>] [co=KEY=VALUE]... [lco=KEY=VALUE]...
        [text=points|skip] [curve=<m>] [properties=yes|no] [PREVIEW]
+EXPORT <file.dwg> [<scope>] [release=R2000|R2004|R2007|R2010|R2013|R2018] [PREVIEW]
 ```
+
+A `.dwg` takes the scope and `release=`, the DWG release written, R2018 when
+it is not given; `release=` for any other file is refused by name
+(`docs/dwg.md`, "Releases").
 
 - **The scope is the one grammar** (`katana_cad::scope_verbs::parse_scope_words`, resolved by
   `katana_cad::scope_verbs::match_scope`): no scope words is the whole drawing, as `EXPORT`
@@ -1282,6 +1305,10 @@ EXPORT <file> [<scope>] [layername=<n> | split=layer] [append]
   surfaces with the whole drawing (no scope, or DRAWING with no filter) and
   not with a part of it, as the window's export always did. GDAL's options
   on a .dxf or a .12da are refused by name.
+- **A .dgn takes the scope and `seed=<file>`**, the MicroStation V7 design
+  it is written on (`docs/dgn.md`, "Writing"), its copy cut after its
+  annotation is drawn, as a .dxf's is; `seed=` on any other file is refused
+  by name, and so are GDAL's options on a .dgn.
 - **`layername=`, not `layer=`.** An option key is never a WHERE key:
   `WHERE ... LAYER=` would take `layer=<n>` for a filter
   (`crates/katana_app/src/geo/vector_support.rs`). The plan's grammar said
@@ -1339,9 +1366,11 @@ starting at the selection when there is one, else the whole drawing), the
 option fields (`vectorExportLayerName`, `vectorExportSplit`,
 `vectorExportAppend`, `vectorExportCrs`, `vectorExportCreationOptions`,
 `vectorExportLayerOptions`, `vectorExportText`, `vectorExportCurve`,
-`vectorExportProperties`), and `vectorExportCommand`, `vectorExportPreview`
-and `vectorExportRun`, which hand the line to the one executor. The GDAL
-fields are off for a .dxf or a .12da. The C++ window's own exportDrawingTo and
+`vectorExportProperties`, a DWG's release, `vectorExportDwgRelease`, and for a
+.dgn alone `vectorExportSeed`, its `seed=`, `docs/dgn.md`), and
+`vectorExportCommand`, `vectorExportPreview` and `vectorExportRun`, which hand
+the line to the one executor. The GDAL fields are off for a .dxf, a .dwg, a
+.dgn or a .12da, and the DWG release for any file but a .dwg. The C++ window's own exportDrawingTo and
 its native DXF export (`main_window_dxf.cpp`), the second path that wrote
 through `interop` directly and asked "selected only?" in a message box, are
 gone. A headless run still refuses the item's file dialog and names the

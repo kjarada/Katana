@@ -45,6 +45,15 @@ set(KATANA_ALLOWED_archive12d "core;math;geometry;terrain;entity")
 # single undoable step both front ends execute, so that they cannot differ
 # about it.
 set(KATANA_ALLOWED_dxf "core;math;geometry;entity;commands")
+# dwg: DWG read and written through acadrust, a pure Rust crate, beside dxf and for its
+# reason: no GDAL. It sees dxf for what the two formats share - the entity mapping, the
+# layer names, the colours and text codes, the import as one undoable step - so that the
+# two cannot differ about a drawing (docs/dwg.md).
+set(KATANA_ALLOWED_dwg "core;math;geometry;entity;commands;dxf")
+# dgn: MicroStation V7 design files, read and written natively in safe Rust from dgnlib's
+# published layout, beside dxf and for its reason: no GDAL. It needs no commands - its import
+# is the DXF import's one undoable step, which the front ends build (docs/dgn.md).
+set(KATANA_ALLOWED_dgn "core;math;geometry;entity")
 # ifc: IFC 4.3 export, written natively beside dxf and for its reason: no
 # third-party library. It sees survey for the AS 5488 grading of the services
 # it writes (docs/ifc.md), terrain for the surfaces, and commands for one
@@ -81,9 +90,9 @@ set(KATANA_ALLOWED_render "core;math;geometry")
 set(KATANA_ALLOWED_cad
     "core;math;geometry;geodesy;survey;terrain;render;entity;commands;storage")
 set(KATANA_ALLOWED_app
-    "core;math;geometry;geodesy;survey;surveyio;terrain;render;entity;commands;storage;cad;archive12d;dxf;ifc;gis;pointcloud;interop;update")
+    "core;math;geometry;geodesy;survey;surveyio;terrain;render;entity;commands;storage;cad;archive12d;dxf;dwg;dgn;ifc;gis;pointcloud;interop;update")
 set(KATANA_ALLOWED_qt
-    "core;math;geometry;geodesy;survey;surveyio;terrain;render;entity;commands;storage;cad;archive12d;dxf;ifc;gis;pointcloud;interop;update;app;gpu")
+    "core;math;geometry;geodesy;survey;surveyio;terrain;render;entity;commands;storage;cad;archive12d;dxf;dwg;dgn;ifc;gis;pointcloud;interop;update;app;gpu")
 # The GPU renderer (katana_gpu, docs/gpu.md) is the software rasteriser's twin
 # behind the same seam: it may see a DrawList, a Camera and the point cloud's
 # plain types, and never a Document - so it gets render's rule, not the

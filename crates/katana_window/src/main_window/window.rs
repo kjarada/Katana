@@ -1307,8 +1307,18 @@ impl MainWindow {
             }
             return;
         }
+        // DWG (docs/dwg.md): read natively, where it lands asked as for a DXF - before GDAL is
+        // asked what the file is.
+        if katana_dwg::is_dwg_path(&path) {
+            self.import_with_placement(selected);
+            return;
+        }
         let kind = katana_interop::import::kind_for_path(&path);
-        if katana_dxf::is_dxf_path(&path) || kind == katana_interop::import::SourceKind::Archive12d {
+        if katana_dxf::is_dxf_path(&path)
+            // DGN: a V7 design asks where it lands, as a DXF does (docs/dgn.md).
+            || katana_dgn::is_dgn_path(&path)
+            || kind == katana_interop::import::SourceKind::Archive12d
+        {
             self.import_with_placement(selected);
             return;
         }
@@ -1355,7 +1365,14 @@ impl MainWindow {
     /// MainWindow::importWithOptions.
     pub fn import_with_options(&mut self, path: &str) {
         let file = path_from_utf8(path);
+        // DWG (docs/dwg.md): where it lands is all there is to ask, as for a DXF.
+        if katana_dwg::is_dwg_path(&file) {
+            self.import_with_placement(path);
+            return;
+        }
         if katana_dxf::is_dxf_path(&file)
+            // DGN
+            || katana_dgn::is_dgn_path(&file)
             || katana_interop::import::kind_for_path(&file)
                 == katana_interop::import::SourceKind::Archive12d
         {
@@ -1387,7 +1404,8 @@ impl MainWindow {
             return;
         }
         let mut dialog = rfd::FileDialog::new().set_title("Export");
-        for format in katana_interop::export::vector_export_formats() {
+        let formats = katana_interop::export::vector_export_formats();
+        for format in &formats {
             dialog = dialog.add_filter(format.description.clone(), &[format.extension.as_str()]);
         }
         // The archive format by the name the rule allows (docs/rust.md, the naming rule).
@@ -1395,6 +1413,13 @@ impl MainWindow {
             .add_filter("Archive", &["12da"])
             .add_filter("Archive, zipped", &["12daz"])
             .add_filter("IFC 4.3", &["ifc"]);
+        // DGN: written natively (docs/dgn.md), so offered whether or not this
+        // GDAL has a DGN driver to list it above.
+        if !formats.iter().any(|format| format.extension == "dgn") {
+            dialog = dialog.add_filter(katana_dgn::FILE_TYPE_NAME, &["dgn"]);
+        }
+        // DWG (docs/dwg.md): written natively, R2018 unless the dialog's release says otherwise.
+        dialog = dialog.add_filter("DWG drawing", &["dwg"]);
         let Some(chosen) = dialog.save_file() else {
             return;
         };
@@ -1732,7 +1757,12 @@ impl MainWindow {
                 Some((text, ImportOptions::Ifc(Box::new(dialog))));
             return Some(name);
         }
-        if katana_dxf::is_dxf_path(path)
+        // DWG and DGN (docs/dwg.md, docs/dgn.md): the placement step a DXF has, before GDAL
+        // is asked what it is.
+        let dwg = katana_dwg::is_dwg_path(path);
+        if dwg
+            || katana_dgn::is_dgn_path(path)
+            || katana_dxf::is_dxf_path(path)
             || katana_interop::import::kind_for_path(path)
                 == katana_interop::import::SourceKind::Archive12d
         {

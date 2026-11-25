@@ -46,6 +46,7 @@ use katana_commands::{
 use katana_core::error::make_error;
 use katana_core::text::format_exact_real;
 use katana_core::{Error, ErrorCode, Result};
+use katana_dwg::is_dwg_path; // DWG (docs/dwg.md)
 use katana_dxf::{DxfImport, is_dxf_path};
 use katana_entity::entity_geometry::bounding_box;
 use katana_entity::{ColourTable, Layer, Model};
@@ -76,7 +77,11 @@ use super::replies::{value, yes_no};
 use super::vector_support::{
     VerbWords, WordRules, choice_option, joined, list_of, number_option, read_verb_words,
 };
+use crate::dwg_verbs::{apply_dwg_import, read_dwg_import}; // DWG (docs/dwg.md)
 use crate::dxf_verbs::{apply_dxf_import, read_dxf_import};
+// DGN: a MicroStation V7 design, natively (docs/dgn.md).
+use crate::dgn_verbs::{apply_dgn_import, read_dgn_import};
+use katana_dgn::{DgnImport, is_dgn_path};
 use crate::import_records::{
     bounds_text, path_from_text, path_text, placed_record, tally_record, warning_text,
 };
@@ -183,6 +188,10 @@ fn cancelled() -> Error {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Kind {
     Dxf,
+    // DGN: a MicroStation V7 design (docs/dgn.md).
+    Dgn,
+    // DWG (docs/dwg.md): read natively, through katana_dxf's reader.
+    Dwg,
     Vector,
     Archive,
     Raster,
@@ -197,6 +206,10 @@ enum Kind {
 )]
 enum Read {
     Dxf(DxfImport),
+    // DGN
+    Dgn(DgnImport),
+    // DWG: what katana_dxf's reader made of it, as a DXF's.
+    Dwg(DxfImport),
     Vector(VectorImportResult),
     Archive(Archive12dImportResult),
     Raster(RasterOverlay),
@@ -206,7 +219,8 @@ enum Read {
 /// Data that becomes entities can be placed; reference data is drawn at its
 /// own coordinates and cannot.
 fn placeable(kind: Kind) -> bool {
-    matches!(kind, Kind::Dxf | Kind::Vector | Kind::Archive)
+    // DWG and DGN: each comes in as entities, so it is placed as a DXF is.
+    matches!(kind, Kind::Dxf | Kind::Dwg | Kind::Dgn | Kind::Vector | Kind::Archive)
 }
 
 /// What a line asked of the read and of the apply, beside the placement.
@@ -230,6 +244,9 @@ struct Request {
 fn read_at(kind: Kind, file: &Path, shift: Option<Vec2>, request: &Request) -> Result<Read> {
     match kind {
         Kind::Dxf => Ok(Read::Dxf(read_dxf_import(file, shift)?)),
+        // DGN
+        Kind::Dgn => Ok(Read::Dgn(read_dgn_import(file, shift)?)),
+        Kind::Dwg => Ok(Read::Dwg(read_dwg_import(file, shift)?)),
         Kind::Vector => {
             let options = VectorImportOptions {
                 origin_shift: shift,
@@ -253,6 +270,9 @@ fn read_at(kind: Kind, file: &Path, shift: Option<Vec2>, request: &Request) -> R
 fn bounds_of(read: &Read) -> Box2 {
     match read {
         Read::Dxf(read) => read.bounds,
+        // DGN
+        Read::Dgn(read) => read.bounds,
+        Read::Dwg(read) => read.bounds,
         Read::Vector(read) => read.bounds,
         Read::Archive(read) => read.bounds,
         Read::Raster(read) => read.world_bounds(),
@@ -706,14 +726,19 @@ fn apply_import(context: &mut Context<'_>, mut imported: Imported) -> Result<Str
         Read::Dxf(read) => {
             apply_dxf_import(&mut *context.document, read, &file, &placement, &placed)
         }
+        // DGN: its placed record goes after its first line, below.
+        Read::Dgn(read) => apply_dgn_import(&mut *context.document, read, &file),
+        Read::Dwg(read) => {
+            apply_dwg_import(&mut *context.document, read, &file, &placement, &placed)
+        }
         Read::Vector(read) => apply_vector(context, read, &file, &request),
         Read::Archive(read) => apply_archive(context, read, &file),
         Read::Raster(read) => apply_raster(context, read, &file, &request),
         Read::PointCloud(read) => apply_cloud(context, read, &file, &request),
     }?;
-    // The DXF records carry their own placed record; the others' goes after
-    // the imported record, their first line.
-    if kind != Kind::Dxf {
+    // The DXF and DWG records carry their own placed record; the others' goes
+    // after the imported record, their first line.
+    if !matches!(kind, Kind::Dxf | Kind::Dwg) {
         let record = placed_record(&placement, &placed);
         if !record.is_empty() {
             after_first_line(&mut reply, &record);
@@ -783,6 +808,9 @@ fn scope_box(found: &ScopeMatch, model: &Model) -> Box2 {
 fn kind_word(kind: Kind) -> &'static str {
     match kind {
         Kind::Dxf => "dxf",
+        // DGN
+        Kind::Dgn => "dgn",
+        Kind::Dwg => "dwg",
         Kind::Vector => "vector",
         Kind::Archive => "archive",
         Kind::Raster => "raster",
@@ -879,6 +907,13 @@ pub fn prepare_import(context: &mut Context<'_>, tokens: &Tokens, line: &str) ->
 
     let kind = if is_dxf_path(&file) {
         Kind::Dxf
+    } else if is_dgn_path(&file) {
+        // DGN: natively, whatever GDAL's DGN driver would make of it.
+        Kind::Dgn
+    } else if is_dwg_path(&file) {
+        // DWG: before GDAL is asked, which reads one as GIS features where it has a CAD
+        // driver (docs/dwg.md, "Rejected").
+        Kind::Dwg
     } else {
         match kind_for_path(&file) {
             SourceKind::Vector => Kind::Vector,

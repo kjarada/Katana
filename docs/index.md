@@ -54,5 +54,7 @@ runner's.
 | [plotting.md](plotting.md) | plotting: sheets, frames and title blocks (taking over `cad.md`'s "Plotting to PDF") | `crates/katana_window/src/plotting/`, `crates/katana_window/src/sheet_painter.rs`, the sheet verbs |
 | [gpu.md](gpu.md) | GPU drawing: the 3D view on wgpu, its precision rule, shaders, fallback and tests | `katana_gpu`, `crates/katana_window/src/gpu_scene_view.rs` |
 | [dxf.md](dxf.md) | DXF exchange: what is read and written, and why a reader of our own | `katana_dxf` |
+| [dgn.md](dgn.md) | DGN exchange: the open DGN software surveyed, MicroStation V7 designs read and written natively and why, the format, seeds and working units, levels and colours, V8 refused by name and its candidate reader, the three surfaces | `katana_dgn`, `crates/katana_app/src/dgn_verbs.rs` |
+| [dwg.md](dwg.md) | DWG exchange through acadrust: why through the DXF module both ways, the releases read and written and how one is chosen, what is refused and said, the front ends, what is not done | `katana_dwg`, `crates/katana_app/src/dwg_verbs.rs` |
 | [audit/2026-09-23-defects.md](audit/2026-09-23-defects.md) | the audit's defect register, one ID per defect | mark a defect FIXED in the commit that fixes it (`tools/audit_register.py`) |
 | [audit/2026-09-23-findings.md](audit/2026-09-23-findings.md) | the audit's other findings | - |

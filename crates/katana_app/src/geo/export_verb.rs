@@ -10,7 +10,11 @@
 //!        [crs=project|native|<code>] [co=K=V]... [lco=K=V]...
 //!        [text=points|skip] [curve=<m>] [properties=yes|no] [PREVIEW]
 //! EXPORT <file.las|.laz> [CLOUD <id|name>] [PREVIEW]
+//! EXPORT <file.dwg> [<scope>] [release=R2000|R2004|R2007|R2010|R2013|R2018] [PREVIEW]
 //! ```
+//!
+//! A .dwg (docs/dwg.md) is written as a DXF is - the same writer, the same
+//! scope - then as a DWG of the release given, R2018 when none is.
 //!
 //! A .las or .laz is a reference point cloud's, not the drawing's: the points
 //! the session holds, written by PDAL - the sample, when the import was
@@ -19,7 +23,9 @@
 //! The scope is the one grammar (cad's parse_scope_words, resolved by
 //! match_scope): no scope words is the whole drawing, as EXPORT always was.
 //! The reply says what the scope took. The options after it are GDAL's
-//! formats' own; a .dxf or a .12da takes the scope alone.
+//! formats' own; a .dxf or a .12da takes the scope alone, and a .dgn (a
+//! MicroStation V7 design, natively, docs/dgn.md) the scope and
+//! seed=<file>, the design it is written on.
 //!
 //! The drawing is copied when the line is prepared, so the work writes on a
 //! worker while the window stays live; the file is written beside its place
@@ -42,6 +48,7 @@ use katana_cad::scope_verbs::{
 use katana_core::error::make_error;
 use katana_core::text::{equals_ignoring_case, lowered};
 use katana_core::{Error, ErrorCode, Result};
+use katana_dwg::{DwgRelease, is_dwg_path}; // DWG (docs/dwg.md)
 use katana_dxf::is_dxf_path;
 use katana_entity::{EntityId, LeaderContext, Model};
 use katana_gis::GdalDataset;
@@ -62,22 +69,39 @@ use super::import_verb::file_name_text;
 use super::replies::{value, yes_no};
 use super::staged_files::StagedFiles;
 use super::vector_support::{WordRules, choice_option, number_option, read_verb_words};
+// DWG (docs/dwg.md).
+use crate::dwg_verbs::{dwg_export_records, write_dwg_export, write_dwg_export_scoped};
 use crate::dxf_verbs::{dxf_export_records, write_dxf_export, write_dxf_export_scoped};
+// DGN: a MicroStation V7 design, natively, on a seed (docs/dgn.md).
+use crate::dgn_verbs::{dgn_export_records, write_dgn_export, write_dgn_export_scoped};
+use katana_dgn::is_dgn_path;
 use crate::import_records::{path_from_text, path_text, record_text, rest_of_line, warning_text};
 
 const USAGE: &str = "usage: EXPORT <file> [<scope>] [layername=<n> | split=layer] [append] \
                      [crs=project|native|<code>] [co=K=V]... [lco=K=V]... [text=points|skip] \
-                     [curve=<m>] [properties=yes|no] [PREVIEW] | EXPORT <file.las|.laz> \
-                     [CLOUD <id|name>] [PREVIEW]";
+                     [curve=<m>] [properties=yes|no] [release=R2000..R2018] [PREVIEW] | \
+                     EXPORT <file.dgn> [<scope>] [seed=<file>] [PREVIEW] | \
+                     EXPORT <file.las|.laz> [CLOUD <id|name>] [PREVIEW]";
 
 /// The option keys, lower case. co= and lco= are read apart: each may be
 /// given more than once. layername= and not layer=: an option key is never a
 /// WHERE key, and WHERE's LAYER= would be taken for it (vector_support.rs).
 const OPTIONS: [&str; 6] = ["layername", "split", "crs", "text", "curve", "properties"];
 
+/// DGN: seed=<file>, the V7 design a .dgn is written on (docs/dgn.md); read
+/// apart, as co= is, since it is a .dgn's alone.
+const SEED_KEY: &str = "seed";
+/// DWG (docs/dwg.md): a DWG's own option, the release it is written as - R2018 when not
+/// given. Refused by name for every other kind of file.
+const DWG_OPTIONS: [&str; 1] = ["release"];
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Kind {
     Dxf,
+    // DWG (docs/dwg.md): written through katana_dxf's writer, as the release given.
+    Dwg(DwgRelease),
+    // DGN
+    Dgn,
     Archive,
     Vector,
 }
@@ -85,6 +109,9 @@ enum Kind {
 fn kind_word(kind: Kind) -> &'static str {
     match kind {
         Kind::Dxf => "dxf",
+        Kind::Dwg(_) => "dwg",
+        // DGN
+        Kind::Dgn => "dgn",
         Kind::Archive => "archive",
         Kind::Vector => "vector",
     }
@@ -103,7 +130,15 @@ fn begins_options(tokens: &Tokens, i: usize) -> bool {
         && equals > 0
     {
         let key = word[..equals].to_ascii_lowercase();
-        if key == "co" || key == "lco" || OPTIONS.contains(&key.as_str()) {
+        if key == "co"
+            || key == "lco"
+            || OPTIONS.contains(&key.as_str())
+            || DWG_OPTIONS.contains(&key.as_str())
+        {
+            return true;
+        }
+        // DGN: a .dgn's seed design.
+        if key == SEED_KEY {
             return true;
         }
     }
@@ -271,6 +306,8 @@ struct Snapshot {
     projection_wkt: String,
     /// The GDAL formats' options, with the entities the scope took.
     vector: VectorExportOptions,
+    /// DGN: the seed design a .dgn is written on; None is GDAL's.
+    seed: Option<PathBuf>,
     /// Records said after the exported one: what the scope took, a
     /// conversion.
     extra: Vec<String>,
@@ -295,6 +332,49 @@ fn write(kind: Kind, snapshot: &mut Snapshot, to: &Path, named: &Path) -> Result
                 )?,
             };
             dxf_export_records(&written, named)
+        }
+        // DGN: as a DXF, the annotation drawn from the whole drawing first.
+        Kind::Dgn => {
+            let seed = snapshot.seed.as_deref();
+            let written = match &snapshot.only {
+                Some(only) => write_dgn_export_scoped(
+                    &mut snapshot.model,
+                    snapshot.annotation_scale,
+                    to,
+                    &snapshot.leaders,
+                    only,
+                    seed,
+                )?,
+                None => write_dgn_export(
+                    &snapshot.model,
+                    snapshot.annotation_scale,
+                    to,
+                    &snapshot.leaders,
+                    seed,
+                )?,
+            };
+            dgn_export_records(&written, named)
+        }
+        Kind::Dwg(release) => {
+            // As a DXF: the annotation drawn from the whole drawing, then the scope.
+            let written = match &snapshot.only {
+                Some(only) => write_dwg_export_scoped(
+                    &mut snapshot.model,
+                    snapshot.annotation_scale,
+                    to,
+                    &snapshot.leaders,
+                    only,
+                    release,
+                )?,
+                None => write_dwg_export(
+                    &snapshot.model,
+                    snapshot.annotation_scale,
+                    to,
+                    &snapshot.leaders,
+                    release,
+                )?,
+            };
+            dwg_export_records(&written, named)
         }
         Kind::Archive => {
             // An archive carries what the other formats cannot: the drawing's
@@ -404,8 +484,13 @@ pub fn prepare_export(context: &mut Context<'_>, tokens: &Tokens, line: &str) ->
     if let Some(format) = cloud_format(&file) {
         return export_cloud(context, tokens, first, &file, &format);
     }
-    let kind = if is_dxf_path(&file) {
+    let mut kind = if is_dxf_path(&file) {
         Kind::Dxf
+    } else if is_dwg_path(&file) {
+        Kind::Dwg(DwgRelease::DEFAULT)
+    } else if is_dgn_path(&file) {
+        // DGN: natively, not by GDAL's DGN driver.
+        Kind::Dgn
     } else if kind_for_path(&file) == SourceKind::Archive12d {
         Kind::Archive
     } else {
@@ -416,7 +501,15 @@ pub fn prepare_export(context: &mut Context<'_>, tokens: &Tokens, line: &str) ->
     let mut rest = Tokens::default();
     let mut creation: Vec<String> = Vec::new();
     let mut layer_creation: Vec<String> = Vec::new();
+    // DGN: seed=<file>, a .dgn's alone; the last one given.
+    let mut seed: Option<String> = None;
     for (word, &quoted) in tokens.words[first..].iter().zip(&tokens.quoted[first..]) {
+        if word.len() > SEED_KEY.len() + 1
+            && word.as_bytes()[..SEED_KEY.len() + 1].eq_ignore_ascii_case(b"seed=")
+        {
+            seed = Some(String::from(&word[SEED_KEY.len() + 1..]));
+            continue;
+        }
         let folded = lowered(&word.as_bytes()[..word.len().min(4)]);
         if folded.starts_with(b"co=") {
             creation.push(String::from(&word[3..]));
@@ -430,7 +523,11 @@ pub fn prepare_export(context: &mut Context<'_>, tokens: &Tokens, line: &str) ->
         rest.quoted.push(quoted);
     }
     let rules = WordRules {
-        options: OPTIONS.map(String::from).to_vec(),
+        options: OPTIONS
+            .iter()
+            .chain(DWG_OPTIONS.iter())
+            .map(|key| String::from(*key))
+            .collect(),
         flags: ["APPEND", "PREVIEW"].map(String::from).to_vec(),
         usage: String::from(USAGE),
         ..WordRules::default()
@@ -438,10 +535,41 @@ pub fn prepare_export(context: &mut Context<'_>, tokens: &Tokens, line: &str) ->
     let words = read_verb_words(&rest, 0, rest.size(), &rules)?;
     let preview = words.has("PREVIEW");
 
-    // A DXF and an archive take the scope alone: GDAL's options are for
-    // GDAL's formats. Refused by name rather than ignored.
+    // DGN: seed= is a .dgn's alone, refused by name for any other file.
+    if let Some(seed) = &seed
+        && kind != Kind::Dgn
+    {
+        return Err(make_error(
+            ErrorCode::InvalidArgument,
+            "seed= is the V7 design a .dgn is written on; this export writes no DGN",
+            format!("seed={seed}"),
+        ));
+    }
+    // DWG (docs/dwg.md): release= says which release a DWG is written as, and is a DWG's
+    // alone - refused by name for another file rather than ignored.
+    if let Some(release) = words.option("release") {
+        let Kind::Dwg(_) = kind else {
+            return Err(make_error(
+                ErrorCode::InvalidArgument,
+                format!(
+                    "release= is an option of a DWG export; a {} export has no release to \
+                     choose",
+                    kind_word(kind)
+                ),
+                format!("release={release}"),
+            ));
+        };
+        kind = Kind::Dwg(DwgRelease::parse(release)?);
+    }
+
+    // A DXF, a DWG, a DGN and an archive take the scope alone: GDAL's options are
+    // for GDAL's formats. Refused by name rather than ignored.
     if kind != Kind::Vector {
-        let given = if let Some(key) = words.options.keys().next() {
+        let given = if let Some(key) = words
+            .options
+            .keys()
+            .find(|key| !DWG_OPTIONS.contains(&key.as_str()))
+        {
             format!("{key}=")
         } else if !creation.is_empty() {
             String::from("co=")
@@ -456,8 +584,15 @@ pub fn prepare_export(context: &mut Context<'_>, tokens: &Tokens, line: &str) ->
             return Err(make_error(
                 ErrorCode::InvalidArgument,
                 format!(
-                    "{given} is an option of a GDAL format; a {} export takes a scope and PREVIEW",
-                    kind_word(kind)
+                    "{given} is an option of a GDAL format; a {} export takes a scope{} and \
+                     PREVIEW",
+                    kind_word(kind),
+                    // DWG and its release, DGN and its seed.
+                    match kind {
+                        Kind::Dwg(_) => ", release=",
+                        Kind::Dgn => ", seed=<file>",
+                        _ => "",
+                    }
                 ),
                 path_text(&file),
             ));
@@ -577,6 +712,21 @@ pub fn prepare_export(context: &mut Context<'_>, tokens: &Tokens, line: &str) ->
         projection_wkt: project,
         vector: VectorExportOptions::default(),
         extra: Vec::new(),
+        // DGN: a seed that is not there is said now, before anything runs.
+        seed: match &seed {
+            Some(seed) => {
+                let path = path_from_text(trimmed_text(seed));
+                if !path.is_file() {
+                    return Err(make_error(
+                        ErrorCode::NotFound,
+                        "seed= names no file",
+                        path_text(&path),
+                    ));
+                }
+                Some(path)
+            }
+            None => None,
+        },
     };
 
     // What the scope took; no scope is the whole drawing, as EXPORT was.
@@ -613,9 +763,11 @@ pub fn prepare_export(context: &mut Context<'_>, tokens: &Tokens, line: &str) ->
         } else if !whole_drawing {
             // The DXF and archive writers take a model: the copy keeps what
             // the scope took and nothing else. The archive's now; a DXF's
-            // after its annotation is drawn from the whole (Snapshot::only).
+            // after its annotation is drawn from the whole (Snapshot::only),
+            // and a DWG's likewise, since it is written as a DXF is.
             let kept: BTreeSet<EntityId> = found.matched.iter().copied().collect();
-            if kind == Kind::Dxf {
+            // DWG and DGN: cut after its annotation is drawn, as a DXF's is.
+            if matches!(kind, Kind::Dxf | Kind::Dwg(_) | Kind::Dgn) {
                 snapshot.only = Some(kept);
             } else {
                 for id in snapshot.model.entities.ids() {

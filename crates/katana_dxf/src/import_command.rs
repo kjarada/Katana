@@ -7,7 +7,7 @@ use katana_commands::{
     CommandPtr, Transaction, create_entities, create_layer, create_linetype, update_layer,
 };
 use katana_entity::layer_path::layer_ancestors;
-use katana_entity::{Layer, Model};
+use katana_entity::{Entity, Layer, Linetype, Model};
 
 use crate::reader::DxfImport;
 
@@ -23,6 +23,24 @@ use crate::reader::DxfImport;
 /// None when there is nothing to add: every layer and linetype is already in
 /// the model and the file drew nothing.
 pub fn import_command(imported: &mut DxfImport, model: &Model) -> Option<CommandPtr> {
+    import_parts(
+        &mut imported.entities,
+        &imported.layers,
+        &imported.linetypes,
+        model,
+    )
+}
+
+/// The same one step for what any reader of a drawing brought - the DGN
+/// reader's entities and layers as well as this module's (docs/dgn.md) - so
+/// that every drawing import is one undo step built one way. The entities are
+/// moved out of `entities`.
+pub fn import_parts(
+    entities: &mut Vec<Entity>,
+    layers: &[Layer],
+    linetypes: &[Linetype],
+    model: &Model,
+) -> Option<CommandPtr> {
     let mut transaction = Transaction::new("IMPORT");
     // The layers the model already has that would refuse the new entities:
     // locked themselves, or the parent of a layer the entities land on. A
@@ -31,8 +49,7 @@ pub fn import_command(imported: &mut DxfImport, model: &Model) -> Option<Command
     // same case, so the lock is lifted for the entities and put back after
     // them - the model's lock, not the file's, since the layer is the
     // model's. Ordered, so that the step is the same every time.
-    let receiving: BTreeSet<&str> = imported
-        .entities
+    let receiving: BTreeSet<&str> = entities
         .iter()
         .map(|entity| entity.layer.as_str())
         .collect();
@@ -60,14 +77,14 @@ pub fn import_command(imported: &mut DxfImport, model: &Model) -> Option<Command
         open.locked = false;
         transaction.add(update_layer(open));
     }
-    for linetype in &imported.linetypes {
+    for linetype in linetypes {
         if !model.linetypes.contains(&linetype.name) {
             transaction.add(create_linetype(linetype.clone()));
         }
     }
     // By name, so that "a" comes before "a/b": adding "a/b" first would make
     // "a" with the defaults, and adding "a" after it would then fail.
-    let mut layers = imported.layers.clone();
+    let mut layers = layers.to_vec();
     layers.sort_by(|a, b| a.name.as_str().cmp(b.name.as_str()));
     let mut to_lock: Vec<Layer> = Vec::new();
     for mut layer in layers {
@@ -80,8 +97,8 @@ pub fn import_command(imported: &mut DxfImport, model: &Model) -> Option<Command
         }
         transaction.add(create_layer(layer));
     }
-    if !imported.entities.is_empty() {
-        transaction.add(create_entities(std::mem::take(&mut imported.entities)));
+    if !entities.is_empty() {
+        transaction.add(create_entities(std::mem::take(entities)));
     }
     for layer in to_lock {
         transaction.add(update_layer(layer));

@@ -128,6 +128,11 @@ and `paste` run only while building.
 | byteorder-lite, memchr, same-file, termcolor, walkdir, winapi-util | 0.1.0, 2.8.3, 1.0.6, 1.4.1, 2.5.0, 0.1.11 | Unlicense OR MIT | the window's crates above |
 | slotmap, zlib-rs | 1.1.1, 0.6.8 | Zlib | the window's crates above |
 | bytemuck_derive, dispatch2, objc2-app-kit, objc2-core-foundation, objc2-core-graphics, objc2-io-surface, objc2-metal, objc2-quartz-core, objc2-ui-kit, tinyvec | 1.12.1, 0.3.1, 0.3.2, 0.3.2, 0.3.2, 0.3.2, 0.3.2, 0.3.2, 0.3.2, 1.13.3 | Zlib OR Apache-2.0 OR MIT | the window's crates above |
+| acadrust | 0.6.8 | MPL-2.0 (its `license` field and its LICENSE file, read 2026-11-25); its DWG reader and writer carry MIT code ported from ACadSharp (Copyright (c) 2021 Albert Domenech, notice below) | katana_dwg (DWG read and written, docs/dwg.md); the crates it brings are listed from `Cargo.lock` with it |
+| anyhow, core_detect, minimal-lexical, multiversion_no_op | 1.0.104, 1.0.0, 0.2.1, 1.0.0 | MIT OR Apache-2.0 (crates.io, 2026-11-25) | acadrust; anyhow at 1.0.104 of 2026-07-18, its 1.0.105 being two days old then |
+| byteorder | 1.5.0 | Unlicense OR MIT (crates.io, 2026-11-25) | acadrust |
+| encoding_rs | 0.8.44 | (Apache-2.0 OR MIT) AND BSD-3-Clause (crates.io, 2026-11-25): the BSD-3-Clause part is the WHATWG Encoding Standard's index data it carries | acadrust (the DXF and DWG code pages) |
+| nom, oem_cp, phf, phf_shared | 7.1.3, 2.1.2, 0.11.3, 0.11.3 | MIT (crates.io, 2026-11-25) | acadrust; phf and phf_shared at 0.11 beside the window's 0.13 |
 
 Every licence named is compatible with GPL-3.0-or-later: Apache-2.0 is
 compatible with GPL version 3, and MIT, BSD-2-Clause, BSD-3-Clause, ISC,
@@ -149,6 +154,15 @@ into a Linux build that does not need it. egui's embedded fonts
 and the Ubuntu Font Licence 1.0: whether the GPL-3.0 rule applies to them,
 and which font the window carries, waits on the owner (docs/rust.md, "Not
 done"), and is to be settled before the first Rust release.
+
+**acadrust** (2026-11-25, DWG; docs/dwg.md): the one crate `katana_dwg` adapts, built
+without its default `parallel` feature. MPL-2.0 is a copyleft of each file: the
+files of acadrust compiled into the programs stay available under MPL-2.0, with their
+source (crates.io keeps the published 0.6.8, and <https://github.com/hakanaktt/acadrust>
+its history). Its sources carry no "Incompatible With Secondary Licenses" notice
+(searched in the published 0.6.8 on 2026-11-25), so MPL-2.0 section 3.3 lets the larger
+work be distributed under GPL-3.0-or-later, as Eigen's translated QR is (below). Its DWG
+reader and writer are ported from ACadSharp, MIT, whose notice is kept (below).
 
 **Fonts embedded in the window.** Compiled into `katana_window` with
 `include_bytes!` (`crates/katana_window/src/canvas/text.rs`), so shipped inside the
@@ -175,6 +189,7 @@ are quoted as fdlibm distributes them).
 | CGAL: Constrained_triangulation_plus_2, Constrained_Delaunay_triangulation_2, Triangulation_2 (the perturbed in-circle test) | 6.2 | GPL-3.0-or-later (Copyright (c) 1997-2012 INRIA Sophia-Antipolis) | `crates/katana_terrain/src/cdt_backend.rs` | The same licence as Katana's; keep the notices. |
 | CGAL: Intersections_2/Segment_2_Segment_2 (the crossing point's construction) | 6.2 | LGPL-3.0-or-later (Copyright (c) 2000 Utrecht University, ETH Zurich, INRIA Sophia-Antipolis and others) | `crates/katana_terrain/src/cdt_backend.rs` | Compatible with GPL-3.0-or-later; keep the notice. |
 | libstdc++: `uniform_int_distribution`, `generate_canonical`, `std::clamp` | GCC 16.2 | GPL-3.0-or-later with the GCC Runtime Library Exception (Copyright (C) Free Software Foundation, Inc.) | the tests' random engines (the `tests/support` modules of the geometry, render, entity, dxf, surveyio, terrain and other crates) and `katana_math::cpp::clamp` | The same licence as Katana's. |
+| GDAL's dgnlib (DGN): the default colour table `abyDefaultPCT` of `dgnhelp.cpp`, copied as data; the V7 element layout its `dgnread.cpp` and `dgnwrite.cpp` read and write, followed by offset (no code translated); VAX D-float conversion as `port/cpl_vax.cpp` defines it | GDAL 3.13.2 | MIT (Copyright (c) 2000, 2002, Avenza Systems Inc; dgnwrite.cpp also Copyright (c) 2002, Frank Warmerdam and Copyright (c) 2011-2013, Even Rouault; verified in the GDAL 3.13.2 sources, 2026-11-25) | `crates/katana_dgn/src/codes.rs` (the table), `crates/katana_dgn/src/reader.rs` and `crates/katana_dgn/src/writer.rs` (the layout) | Keep the copyright and permission notice: GDAL's own, kept for GDAL in section 2 already, covers it (MIT). |
 
 nlohmann/json's copyright and permission notice, as its `LICENSE.MIT` gives it:
 
@@ -202,6 +217,33 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+
+ACadSharp's copyright and permission notice, as acadrust 0.6.8's THIRD_PARTY_NOTICES.md
+gives it for the DWG code ported from it:
+
+```text
+Copyright (c) 2021 Albert Domenech
+
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
 
 ## 2. Shared libraries beside the programs
 

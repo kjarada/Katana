@@ -45,7 +45,7 @@ The public interface:
 | --- | --- |
 | `crates/katana_dxf/src/reader.rs` | `read_dxf(bytes)`, `read_dxf_file(path)` -> `DxfImport`: entities, layers, linetypes, bounds, the release, a tally per entity kind, warnings. `is_dxf_path`. |
 | `crates/katana_dxf/src/writer.rs` | `write_dxf(model)`, `write_dxf_file(model, path)` -> `DxfExport`: the text (or the file), counts, warnings. `layer_name_for`. |
-| `crates/katana_dxf/src/import_command.rs` | `import_command(import, model)`: linetypes, layers, entities and layer locks as one transaction. A layer the model already has locked (or whose parent is locked) is opened for the new entities and locked again in the same step, so a file imported twice, or two sheets that share a locked layer, both come in. |
+| `crates/katana_dxf/src/import_command.rs` | `import_command(import, model)`: linetypes, layers, entities and layer locks as one transaction. A layer the model already has locked (or whose parent is locked) is opened for the new entities and locked again in the same step, so a file imported twice, or two sheets that share a locked layer, both come in. `import_parts` is the same step for any reader's entities and layers: the DGN import's (`docs/dgn.md`), so a drawing import is built one way. |
 | `crates/katana_dxf/src/codes.rs` | The indexed colours (re-exported from `katana_entity::indexed_colours`, the one table; see "Colours" below), lineweights, and the text codes (`%%d`, `\U+XXXX`, MTEXT formatting), exposed so tests check them against hand-worked values. |
 
 ## Reading
@@ -166,7 +166,10 @@ What is not read, and is said - every kind the file held is in the tally
 - paper space: an entity with group 67 set, and layouts - a Katana drawing is
   the model;
 - external references: the insert is reported, the other drawing not read;
-- binary DXF (refused by name: save as ASCII DXF) and DWG.
+- binary DXF (refused by name: save as ASCII DXF). A DWG is read by
+  `katana_dwg`, through this reader (`docs/dwg.md`); a MicroStation design
+  is `katana_dgn`'s (`docs/dgn.md`), which refuses a DXF named `.dgn` by
+  name.
 
 ### When the file is damaged
 
@@ -245,6 +248,13 @@ them that other programs read), alignments, surfaces and meshes, styles and
 symbols (an entity is written with its own colour and its layer's linetype),
 hatch patterns, and blocks - what Katana draws, it writes as the entities
 drawn.
+
+*Found 2026-11-25, not yet checked:* a bottom-left Text of several lines is
+written with its FIRST line at the text's position and the others below,
+where `katana_entity::text_block::line_origin` - the layout the plan view
+draws by, and the DGN writer writes by - puts its LAST line's baseline there
+and the others above. One of the two is not what the plan view shows
+(`docs/dgn.md`, "Not done").
 
 ## Measured
 

@@ -9,7 +9,10 @@
 pub mod console; // wave 0
 pub mod import_records; // wave 0
 
+pub mod dwg_verbs; // DWG (docs/dwg.md)
 pub mod dxf_verbs; // F1
+// DGN: MicroStation V7 designs, read and written natively (docs/dgn.md).
+pub mod dgn_verbs;
 pub mod ifc_verbs; // F1
 pub mod session; // S1 (its update part: session/update_part.rs)
 pub mod survey_export_verb; // SURVEY EXPORT (2026-11-19)

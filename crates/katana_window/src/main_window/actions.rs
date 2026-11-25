@@ -150,7 +150,7 @@ pub fn import_action() -> Action {
         "fileImport",
         "Import",
         "Import &Any File...",
-        "Import a drawing, an image or a point cloud (DXF, IFC, SHP, GeoTIFF, LAS ...)",
+        "Import a drawing, an image or a point cloud (DXF, DWG, DGN, IFC, SHP, GeoTIFF, LAS ...)",
     )
     .shortcut(ctrl(Key::I))
 }
@@ -160,8 +160,8 @@ pub fn export_action() -> Action {
         "fileExportVector",
         "Export",
         "Export Dra&wing...",
-        "Export the drawing, or a scope of it, to a file: DXF, an archive, IFC 4.3 or a GIS \
-         vector format (GeoPackage, GeoJSON, SHP ...)",
+        "Export the drawing, or a scope of it, to a file: DXF, DWG, DGN V7, an archive, IFC 4.3 \
+         or a GIS vector format (GeoPackage, GeoJSON, SHP ...)",
     )
     .shortcut(ctrl_shift(Key::E))
 }

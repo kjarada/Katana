@@ -448,6 +448,30 @@ fn export_option_words(arguments: &Json) -> Result<String, ToolRefusal> {
             " properties=no"
         };
     }
+    // DGN: the V7 design a .dgn is written on (seed=, docs/dgn.md).
+    let seed = argument(arguments, "seed");
+    if !seed.is_null() {
+        match seed.as_str() {
+            Some(text) if !text.is_empty() => words += &option_word("seed", text)?,
+            _ => {
+                return Err(ToolRefusal::new(
+                    "\"seed\" is the path of a V7 design file",
+                ));
+            }
+        }
+    }
+    // DWG (docs/dwg.md): the release a .dwg is written as, a word EXPORT checks.
+    let release = argument(arguments, "release");
+    if !release.is_null() {
+        match release.as_str() {
+            Some(text) if !text.is_empty() => words += &option_word("release", text)?,
+            _ => {
+                return Err(ToolRefusal::new(
+                    "\"release\" is a DWG release: R2000, R2004, R2007, R2010, R2013 or R2018",
+                ));
+            }
+        }
+    }
     if optional_bool(arguments, "preview", false)? {
         words += " PREVIEW";
     }
@@ -1089,10 +1113,11 @@ fn tools() -> &'static [Tool] {
                 name: "katana_import",
                 title: "Import a file",
                 description: concat!(
-                    "Import a file into the drawing: DXF always; with the GIS module also shapefiles, ",
+                    "Import a file into the drawing: DXF, DWG and MicroStation V7 DGN always; with ",
+                    "the GIS module also shapefiles, ",
                     "GeoJSON, GeoPackage, .12da archives and other vector formats (as entities), and ",
                     "rasters and point clouds (as reference layers). placement says where what a DXF, ",
-                    "vector file or .12da archive holds lands: at its own coordinates (keep, the ",
+                    "DWG, vector file or .12da archive holds lands: at its own coordinates (keep, the ",
                     "default), moved as one piece so its lower-left corner sits at 0,0 (local), onto ",
                     "the drawing's lower-left corner (alongside), or by offset_east and offset_north ",
                     "(offset). The reply is records: imported (what came in, its extent and CRS), placed ",
@@ -1107,7 +1132,9 @@ fn tools() -> &'static [Tool] {
                 name: "katana_export",
                 title: "Export the drawing",
                 description: concat!(
-                    "Export the drawing to a file, its format chosen by the extension: .dxf always; with ",
+                    "Export the drawing to a file, its format chosen by the extension: .dxf, .dwg ",
+                    "(release: the DWG release, R2018 by default) and .dgn (MicroStation V7, on a ",
+                    "seed design: seed) always; with ",
                     "the GIS module also GIS vector formats and .12da archives (with the session's ",
                     "surfaces). The reply is an exported record - the driver, how many features or ",
                     "entities were written and how many skipped - and any warnings, in ",
@@ -1621,6 +1648,19 @@ fn export_properties() -> Json {
                 [],
             ),
         ),
+        // DWG (docs/dwg.md).
+        (
+            "release",
+            property(
+                Json::from("string"),
+                "With a .dwg path: the DWG release written (release=); R2018 when absent, the \
+                 one AutoCAD has written since 2018. Older programs need an older one.",
+                [(
+                    "enum",
+                    words(["R2000", "R2004", "R2007", "R2010", "R2013", "R2018"]),
+                )],
+            ),
+        ),
         (
             "cloud",
             property(
@@ -1628,6 +1668,17 @@ fn export_properties() -> Json {
                 "With a .las or .laz path: the reference point cloud to write, by id or name \
                  (CLOUD); the one there is when absent. The points held are written, a budgeted \
                  import's sample included, which the reply says.",
+                [],
+            ),
+        ),
+        // DGN
+        (
+            "seed",
+            property(
+                Json::from("string"),
+                "With a .dgn path: the MicroStation V7 design file it is written on, whose \
+                 working units and global origin are kept (seed=); GDAL's seed_2d.dgn or \
+                 seed_3d.dgn, in metres, when absent.",
                 [],
             ),
         ),

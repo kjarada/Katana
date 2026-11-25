@@ -67,6 +67,8 @@ pub mod processing {
 }
 
 pub use formats::{Content, DataKind, Format, FormatOption, FormatOptions, OptionList, SaveChoice};
+// DGN: GDAL's seed designs, for the native DGN export (docs/dgn.md).
+pub use gdal_registry::gdal_data_file;
 pub use gdal_adapter::{
     GdalDataset, GeoPoint, GeometryKind, RasterExportOptions, RasterImage, RasterInfo,
     RasterSamples, VectorExportOptions, VectorFeature, VectorGeometry, VectorLayerInfo,

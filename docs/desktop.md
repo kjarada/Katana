@@ -256,7 +256,7 @@ File had seventeen top-level items and has fifteen.
   "Import Any File..." (A: I is the submenu's letter in File, and Import
   Survey Points' inside it) and `fileExportIfc` underlines F (E is Export
   Survey Points'). `fileExportVector` is "Export Drawing...": it writes DXF,
-  archives and IFC as well as the GIS vector formats, which "Export Vector"
+  DWG (`docs/dwg.md`), archives and IFC as well as the GIS vector formats, which "Export Vector"
   did not say, and its tip says what it takes. Tests, scripts and
   `--trigger` find an item by its control name, which is why none moved.
 - **Save As offers a folder the person owns.** `MainWindow::save_document_as`
@@ -5268,7 +5268,7 @@ Each now reaches the same code on every front end
   (the session's name and origin, its sources, the automation, the linework
   codes, what the open project is missing) and what it covers in this
   drawing.
-- `IMPORT <file> LOCAL` moves a DXF, vector file or .12da archive as one piece
+- `IMPORT <file> LOCAL` moves a DXF, DGN, vector file or .12da archive as one piece
   so its lower-left corner sits at 0,0, and asks nothing; a raster or a point
   cloud refuses it by name. The path and the `LOCAL` are read by
   `CommandInterpreter::import_argument`, as the session reads them; `LOCAL` was

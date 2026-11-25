@@ -21,15 +21,20 @@
 //! vectorExportText              skip | points (text=)
 //! vectorExportCurve             the chords' largest stray from an arc (curve=)
 //! vectorExportProperties        write entity properties (properties=)
+//! vectorExportSeed              a .dgn's seed design (seed=; docs/dgn.md)
+//! vectorExportDwgRelease        a .dwg's release, R2018 to R2000 (release=)
 //! ```
 //!
-//! A .dxf or an archive (.12da) takes the scope alone: the GDAL fields are off for one.
+//! A .dxf or an archive (.12da) takes the scope alone: the GDAL fields are off for one. A .dgn
+//! takes the scope and its seed design, the one field on for it; a .dwg (docs/dwg.md) takes
+//! the scope and its release, which is off for every other file.
 
 use egui::Ui;
 use katana_app::geo::replies::parse_records;
 use katana_core::error::make_error;
 use katana_core::text::parse_finite_double;
 use katana_core::{Error, ErrorCode, Result};
+use katana_dwg::DwgRelease; // DWG (docs/dwg.md)
 use katana_interop::export::vector_export_formats;
 
 use crate::customisation::ScopeChoice;
@@ -60,6 +65,10 @@ pub struct VectorExportForm {
     /// Empty: the verb's 1 mm.
     pub curve: String,
     pub properties: bool,
+    /// DGN: the seed design a .dgn is written on; empty for GDAL's.
+    pub seed: String,
+    /// DWG (docs/dwg.md): a .dwg's release, "R2013"; empty, or R2018, the verb's default.
+    pub dwg_release: String,
 }
 
 impl Default for VectorExportForm {
@@ -76,6 +85,8 @@ impl Default for VectorExportForm {
             text_as_points: false,
             curve: String::new(),
             properties: true,
+            seed: String::new(),
+            dwg_release: String::new(),
         }
     }
 }
@@ -104,11 +115,41 @@ fn option_words(key: &str, text: &str, field: &str) -> Result<String> {
     Ok(words)
 }
 
-/// Whether EXPORT writes `file` natively (a .dxf, an archive), which takes a scope and none of
-/// GDAL's options.
+/// Whether EXPORT writes `file` natively (a .dxf, a .dwg, a .dgn, an archive), which takes a
+/// scope and
+/// none of GDAL's options.
 pub fn export_is_native(file: &str) -> bool {
     let lower = file.trim().to_lowercase();
-    lower.ends_with(".dxf") || lower.ends_with(".12da") || lower.ends_with(".12daz")
+    lower.ends_with(".dxf")
+        // DGN
+        || export_is_dgn(&lower)
+        || export_is_dwg(file)
+        || lower.ends_with(".12da")
+        || lower.ends_with(".12daz")
+}
+
+/// DGN: whether EXPORT writes `file` as a MicroStation V7 design, which takes a seed= too.
+pub fn export_is_dgn(file: &str) -> bool {
+    katana_dgn::is_dgn_path(std::path::Path::new(file.trim()))
+}
+
+/// DWG (docs/dwg.md): whether `file` is a .dwg, whose release the dialog asks.
+pub fn export_is_dwg(file: &str) -> bool {
+    file.trim().to_lowercase().ends_with(".dwg")
+}
+
+/// " release=<release>" for a .dwg whose release is not the verb's default, R2018; nothing
+/// otherwise. InvalidArgument for a word that names no release written.
+fn dwg_release_word(form: &VectorExportForm) -> Result<String> {
+    let given = form.dwg_release.trim();
+    if !export_is_dwg(&form.file) || given.is_empty() {
+        return Ok(String::new());
+    }
+    let release = DwgRelease::parse(given).map_err(|error| invalid(error.message))?;
+    if release == DwgRelease::DEFAULT {
+        return Ok(String::new());
+    }
+    Ok(format!(" release={}", release.name()))
 }
 
 /// EXPORT "<file>" <scope> [layername=<n>] [split=layer] [append] [crs=<c>] [co=K=V]...
@@ -128,8 +169,16 @@ pub fn vector_export_line(form: &VectorExportForm) -> Result<String> {
     }
     let scope = gis_scope(&form.scope)?;
     let mut line = format!("EXPORT \"{file}\" {scope}");
+    // DGN: the scope and the seed design it is written on, when one is named.
+    let seed = form.seed.trim();
+    if export_is_dgn(file) && !seed.is_empty() {
+        line.push_str(" seed=");
+        line.push_str(&gis_word(seed, "The seed design")?);
+        return Ok(line);
+    }
     if export_is_native(file) {
-        // A .dxf and an archive take the scope alone.
+        // A .dxf and an archive take the scope alone; a .dwg its release too.
+        line.push_str(&dwg_release_word(form)?);
         return Ok(line);
     }
     let name = form.layer_name.trim();
@@ -195,6 +244,11 @@ pub struct VectorExportDialog {
     text: Choice,
     curve: String,
     properties: bool,
+    // DGN
+    seed: String,
+    // DWG (docs/dwg.md): the releases written, newest first, and the one chosen.
+    dwg_release_items: Vec<String>,
+    dwg_release: Choice,
 }
 
 impl VectorExportDialog {
@@ -230,6 +284,14 @@ impl VectorExportDialog {
             text: Choice::at(0),
             curve: String::new(),
             properties: true,
+            seed: String::new(),
+            dwg_release_items: DwgRelease::ALL
+                .iter()
+                .rev()
+                .map(|release| String::from(release.name()))
+                .collect(),
+            // R2018, the newest and the verb's default.
+            dwg_release: Choice::at(0),
         }
     }
 
@@ -278,6 +340,12 @@ impl VectorExportDialog {
                 .is_some_and(|(_, word)| *word == "points"),
             curve: self.curve.clone(),
             properties: self.properties,
+            seed: if export_is_dgn(&self.file) {
+                self.seed.clone()
+            } else {
+                String::new()
+            },
+            dwg_release: self.dwg_release.current_text(&self.dwg_release_items),
         }
     }
 
@@ -298,6 +366,14 @@ impl VectorExportDialog {
             .collect();
         filters.push(String::from("Archive (*.12da)"));
         filters.push(String::from("Archive, zipped (*.12daz)"));
+        // DGN: written natively, offered whether or not GDAL lists it.
+        if !vector_export_formats()
+            .iter()
+            .any(|format| format.extension == "dgn")
+        {
+            filters.push(format!("{} (*.dgn)", katana_dgn::FILE_TYPE_NAME));
+        }
+        filters.push(String::from("DWG drawing (*.dwg)")); // DWG (docs/dwg.md)
         let chosen = get_save_file_name("Export", &self.file, &filters.join(";;"));
         if !chosen.is_empty() {
             self.set_file(&chosen);
@@ -350,8 +426,37 @@ impl GisTool for VectorExportDialog {
             "File:",
             &mut self.file,
             "the file to write, e.g. site.gpkg",
-            "Its extension picks the format: .gpkg, .geojson, .shp, .kml, .dxf, .12da ...",
+            "Its extension picks the format: .gpkg, .geojson, .shp, .kml, .dxf, .dwg, .dgn, .12da ...",
         );
+        // DGN: the seed design, on for a .dgn alone.
+        ui.add_enabled_ui(export_is_dgn(&self.file), |ui| {
+            gis_field(
+                ui,
+                "vectorExportSeed",
+                "Seed design (.dgn):",
+                &mut self.seed,
+                "GDAL's seed design, in metres",
+                "seed=: the MicroStation V7 design the file is written on - your office's seed, \
+                 whose working units and global origin are kept. Empty: GDAL's seed_2d.dgn, or \
+                 seed_3d.dgn when the drawing holds heights, in metres at the finest resolution \
+                 that holds it.",
+            );
+        });
+        // DWG (docs/dwg.md): the release a .dwg is written as, off for every other file.
+        ui.add_enabled_ui(export_is_dwg(&self.file), |ui| {
+            dialog::labelled(ui, "DWG release:", |ui| {
+                token_choice(
+                    ui,
+                    "vectorExportDwgRelease",
+                    &self.dwg_release_items,
+                    &mut self.dwg_release,
+                )
+                .on_hover_text(
+                    "release=: R2018, the newest, which AutoCAD has written since 2018; an \
+                     older program needs an older release, R2000 the oldest written",
+                );
+            });
+        });
         // A .dxf and an archive take the scope alone: the GDAL fields are off for one.
         let gdal = self.gdal();
         // One file layer per drawing layer names each: the layer name goes off.

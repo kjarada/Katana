@@ -12,6 +12,7 @@
 //! verb_usage        tests/geo/test_verb_usage.cpp       GeoVerbUsage
 //! drape_and_sample  tests/geo/test_drape_and_sample.cpp DrapeAndSample
 //! zonal_verb        tests/geo/test_zonal_verb.cpp       ZonalVerb
+//! dwg_verbs         (no C++ twin: DWG came after it)     IMPORT and EXPORT of a .dwg
 //! ```
 //!
 //! The files' other suites are twinned elsewhere: GisRecords by the frame
@@ -47,6 +48,7 @@ pub mod app_support;
 pub mod geo_fixture;
 
 mod drape_and_sample;
+mod dwg_verbs; // DWG (docs/dwg.md)
 mod export_options;
 mod formats;
 mod gis_verbs;
